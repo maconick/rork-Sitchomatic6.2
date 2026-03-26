@@ -31,8 +31,6 @@ class PPSRAutomationEngine {
     private let deadSessionDetector = DeadSessionDetector.shared
     private let aiSessionHealth = AISessionHealthMonitorService.shared
     private let aiAntiDetection = AIAntiDetectionAdaptiveService.shared
-    private let aiOutcomeRescue = AIOutcomeRescueEngine.shared
-    private let aiPreConditioning = AISessionPreConditioningService.shared
     private let aiFingerprintTuning = AIFingerprintTuningService.shared
     private let aiChallengeSolver = AIChallengePageSolverService.shared
     private let customTools = AICustomToolsCoordinator.shared
@@ -474,31 +472,6 @@ class PPSRAutomationEngine {
                 currentURL = await session.getCurrentURL()
                 let retryURLChanged = currentURL != preSubmitURL
                 evaluation = evaluatePPSRResponse(contentLower: contentLower, pageContent: pageContent, currentURL: currentURL, urlChanged: retryURLChanged)
-            }
-        }
-
-        if evaluation.outcome == .uncertain && aiOutcomeRescue.shouldAttemptRescue(outcome: "unsure", confidence: 0.3) {
-            let rescueBundle = RescueSignalBundle(
-                host: ppsr_host, sessionId: sessionId, originalOutcome: "unsure", originalConfidence: 0.3,
-                pageContent: String(pageContent.prefix(2000)), currentURL: currentURL,
-                preLoginURL: preSubmitURL, pageTitle: "", ocrText: nil, httpStatus: nil,
-                latencyMs: Int(Date().timeIntervalSince(check.startedAt ?? Date()) * 1000),
-                redirectChain: urlChanged ? [preSubmitURL, currentURL] : [],
-                cookieCount: 0, hadContentChange: true, hadNavigation: navigated,
-                hadRedirect: urlChanged, welcomeTextFound: false, errorBannerDetected: false, timestamp: Date()
-            )
-            let rescueResult = await aiOutcomeRescue.attemptRescue(bundle: rescueBundle)
-            if rescueResult.rescued {
-                check.logs.append(PPSRLogEntry(message: "AI Outcome Rescue: \(rescueResult.newOutcome) — \(rescueResult.reasoning)", level: .warning))
-                logger.log("AI Outcome Rescue applied: \(rescueResult.newOutcome)", category: .evaluation, level: .info, sessionId: sessionId)
-                switch rescueResult.newOutcome {
-                case "success", "pass":
-                    evaluation = PPSREvaluation(outcome: .pass, score: evaluation.score + 10, reason: "AI rescue: \(rescueResult.reasoning)")
-                case "fail", "failInstitution", "noAcc", "permDisabled":
-                    evaluation = PPSREvaluation(outcome: .failInstitution, score: evaluation.score + 10, reason: "AI rescue: \(rescueResult.reasoning)")
-                default:
-                    break
-                }
             }
         }
 

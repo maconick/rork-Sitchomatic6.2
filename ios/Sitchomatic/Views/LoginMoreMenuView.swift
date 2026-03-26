@@ -51,64 +51,7 @@ struct LoginMoreMenuView: View {
                 }
             }
 
-            NavigationLink {
-                AIInsightsDashboardView()
-            } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.teal.opacity(0.12))
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "brain.head.profile.fill")
-                            .font(.body)
-                            .foregroundStyle(.teal)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("AI Insights").font(.subheadline.bold())
-                        Text("Dashboard, health, detection patterns & AI analysis")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    let mode = AIAntiDetectionAdaptiveService.shared.currentAdaptiveMode()
-                    Text(mode.uppercased())
-                        .font(.system(.caption2, design: .monospaced, weight: .bold))
-                        .foregroundStyle(mode == "defensive" ? .red : mode == "cautious" ? .orange : .green)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background((mode == "defensive" ? Color.red : mode == "cautious" ? Color.orange : Color.green).opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
 
-            NavigationLink {
-                AIPatternDiscoveryDashboardView()
-            } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.purple.opacity(0.12))
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "brain")
-                            .font(.body)
-                            .foregroundStyle(.purple)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Pattern Discovery").font(.subheadline.bold())
-                        Text("Best combos, time heatmaps, proxy trends & convergence")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    let graphStats = AIReinforcementInteractionGraph.shared.hostStats()
-                    let converged = graphStats.filter { $0.converged }.count
-                    if !graphStats.isEmpty {
-                        Text("\(converged)/\(graphStats.count)")
-                            .font(.system(.caption2, design: .monospaced, weight: .bold))
-                            .foregroundStyle(.purple)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.12))
-                            .clipShape(Capsule())
-                    }
-                }
-            }
         } header: {
             Label("Intelligence", systemImage: "sparkles")
         } footer: {

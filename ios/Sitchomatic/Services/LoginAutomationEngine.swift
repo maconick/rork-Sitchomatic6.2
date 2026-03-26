@@ -47,8 +47,6 @@ class LoginAutomationEngine {
     private let aiCredentialPriority = AICredentialPriorityScoringService.shared
     private let aiAntiDetection = AIAntiDetectionAdaptiveService.shared
     private let customTools = AICustomToolsCoordinator.shared
-    private let aiPreConditioning = AISessionPreConditioningService.shared
-    private let aiOutcomeRescue = AIOutcomeRescueEngine.shared
     private let aiInteractionGraph = AIReinforcementInteractionGraph.shared
     private let activityMonitor = SessionActivityMonitor.shared
     private let liveSpeed = LiveSpeedAdaptationService.shared
@@ -103,13 +101,6 @@ class LoginAutomationEngine {
         logger.startSession(sessionId, category: .login, message: "Starting login test for \(attempt.credential.username) → \(targetURL.host ?? targetURL.absoluteString)")
         logger.log("Config: timeout=\(Int(timeout))s stealth=\(stealthEnabled) activeSessions=\(activeSessions)/\(maxConcurrency)", category: .login, level: .debug, sessionId: sessionId, metadata: ["url": targetURL.absoluteString, "username": attempt.credential.username])
 
-        let preConditionRecipe = aiPreConditioning.preConditionSession(for: host)
-        if let bestPatterns = preConditionRecipe.bestPatternOrder, !bestPatterns.isEmpty {
-            attempt.logs.append(PPSRLogEntry(message: "PreCondition: recipe v\(preConditionRecipe.version) — \(preConditionRecipe.totalDataPoints) data pts, \(String(format: "%.0f%%", preConditionRecipe.successRate * 100)) success, patterns=[\(bestPatterns.prefix(3).joined(separator: ","))]", level: .info))
-        }
-        if let extraMs = preConditionRecipe.recommendedPageLoadExtraMs, extraMs > automationSettings.pageLoadExtraDelayMs {
-            attempt.logs.append(PPSRLogEntry(message: "PreCondition: overriding page load extra delay → \(extraMs)ms (was \(automationSettings.pageLoadExtraDelayMs)ms)", level: .info))
-        }
         var interactionActions: [InteractionAction] = []
         _ = Date()
 
@@ -350,20 +341,7 @@ class LoginAutomationEngine {
             }
         }
 
-        let preCondPatternUsed = attempt.logs.first(where: { $0.message.contains("selected pattern") })?.message ?? "unknown"
         let isOutcomeSuccess = outcome == .success || outcome == .noAcc || outcome == .permDisabled || outcome == .tempDisabled
-        aiPreConditioning.recordOutcome(
-            host: host,
-            proxyType: netConfig.label,
-            stealthSeed: session.activeProfileIndex,
-            patternUsed: preCondPatternUsed,
-            urlVariant: targetURL.absoluteString,
-            outcome: "\(outcome)",
-            latencyMs: aiLatencyMs,
-            wasSuccess: isOutcomeSuccess,
-            wasChallenge: aiIsChallenge,
-            wasBlocked: aiIsBlocked
-        )
 
         interactionActions.append(InteractionAction(
             actionType: "session_complete",
@@ -379,55 +357,12 @@ class LoginAutomationEngine {
             finalOutcome: "\(outcome)",
             wasSuccess: isOutcomeSuccess,
             totalDurationMs: aiLatencyMs,
-            patternUsed: preCondPatternUsed,
+            patternUsed: "default",
             proxyType: netConfig.label,
             stealthSeed: session.activeProfileIndex
         )
 
-        var finalOutcomeResult = outcome
-        if aiOutcomeRescue.shouldAttemptRescue(outcome: "\(outcome)", confidence: 0.3) {
-            let pageContent = attempt.responseSnippet ?? ""
-            let currentURL = attempt.detectedURL ?? targetURL.absoluteString
-            let ocrText: String?
-            if let snapshot = attempt.responseSnapshot {
-                ocrText = await aiOutcomeRescue.extractOCRText(from: snapshot)
-            } else {
-                ocrText = nil
-            }
-            let rescueBundle = RescueSignalBundle(
-                host: host,
-                sessionId: sessionId,
-                originalOutcome: "\(outcome)",
-                originalConfidence: 0.3,
-                pageContent: pageContent,
-                currentURL: currentURL,
-                preLoginURL: targetURL.absoluteString,
-                pageTitle: "",
-                ocrText: ocrText,
-                httpStatus: nil,
-                latencyMs: aiLatencyMs,
-                redirectChain: [],
-                cookieCount: 0,
-                hadContentChange: false,
-                hadNavigation: false,
-                hadRedirect: currentURL.lowercased() != targetURL.absoluteString.lowercased(),
-                welcomeTextFound: false,
-                errorBannerDetected: false,
-                timestamp: Date()
-            )
-            let rescueResult = await aiOutcomeRescue.attemptRescue(bundle: rescueBundle)
-            if rescueResult.rescued {
-                attempt.logs.append(PPSRLogEntry(message: "OUTCOME RESCUE: \(outcome) -> \(rescueResult.newOutcome) (\(String(format: "%.0f%%", rescueResult.newConfidence * 100))) - \(rescueResult.reasoning)", level: .success))
-                logger.log("OutcomeRescue: \(outcome) -> \(rescueResult.newOutcome) for \(attempt.credential.username)", category: .evaluation, level: .success, sessionId: sessionId)
-                switch rescueResult.newOutcome {
-                case "success": finalOutcomeResult = .success
-                case "permDisabled": finalOutcomeResult = .permDisabled
-                case "tempDisabled": finalOutcomeResult = .tempDisabled
-                case "noAcc": finalOutcomeResult = .noAcc
-                default: break
-                }
-            }
-        }
+        let finalOutcomeResult = outcome
 
         let pageContent = attempt.responseSnippet ?? ""
         let currentURL = attempt.detectedURL ?? targetURL.absoluteString
