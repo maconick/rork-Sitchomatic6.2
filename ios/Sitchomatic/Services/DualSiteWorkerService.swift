@@ -137,6 +137,11 @@ class DualSiteWorkerService {
 
             let classification = classifyOutcomes(joe: joeOutcome, ignition: ignOutcome, attemptNum: attemptNum, maxAttempts: config.maxAttemptsPerSite)
 
+            let joeRegistered = session.joeAttempts.count
+            let ignRegistered = session.ignitionAttempts.count
+            session.joeSiteResult = SiteResult.fromLoginOutcome(joeOutcome, registeredAttempts: joeRegistered, maxAttempts: config.maxAttemptsPerSite)
+            session.ignitionSiteResult = SiteResult.fromLoginOutcome(ignOutcome, registeredAttempts: ignRegistered, maxAttempts: config.maxAttemptsPerSite)
+
             let terminalStep = classificationToStep(classification)
 
             switch classification {
@@ -145,7 +150,7 @@ class DualSiteWorkerService {
                 session.classification = .validAccount
                 session.identityAction = .burn
                 session.endTime = Date()
-                onLog("Worker \(sessionId): SUCCESS — credential valid", .success)
+                onLog("Worker \(sessionId): SUCCESS — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .success)
                 notifications.sendBatchComplete(working: 1, dead: 0, requeued: 0)
                 await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .successDetected)
 
@@ -154,7 +159,7 @@ class DualSiteWorkerService {
                 session.classification = .permanentBan
                 session.identityAction = .burn
                 session.endTime = Date()
-                onLog("Worker \(sessionId): PERM BAN — early stop, identity burned", .error)
+                onLog("Worker \(sessionId): PERM BAN — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .error)
                 blacklistService.addToBlacklist(session.credential.email, reason: "Auto: perm disabled via unified test")
                 await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .terminalState)
 
@@ -163,11 +168,11 @@ class DualSiteWorkerService {
                 session.classification = .temporaryLock
                 session.identityAction = .save
                 session.endTime = Date()
-                onLog("Worker \(sessionId): TEMP LOCK — account exists, identity saved", .warning)
+                onLog("Worker \(sessionId): TEMP LOCK — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .warning)
                 await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .terminalState)
 
             case .continueLoop:
-                onLog("Worker \(sessionId): incorrect password on attempt \(attemptNum) — continuing", .info)
+                onLog("Worker \(sessionId): incorrect on attempt \(attemptNum) — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .info)
                 await capturePostAttemptScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum)
 
             case .exhausted:
@@ -175,7 +180,11 @@ class DualSiteWorkerService {
                 session.classification = .noAccount
                 session.identityAction = .save
                 session.endTime = Date()
-                onLog("Worker \(sessionId): EXHAUSTED — 4x incorrect, no account", .error)
+                let joeFinal = SiteResult.fromLoginOutcome(joeOutcome, registeredAttempts: joeRegistered, maxAttempts: config.maxAttemptsPerSite)
+                let ignFinal = SiteResult.fromLoginOutcome(ignOutcome, registeredAttempts: ignRegistered, maxAttempts: config.maxAttemptsPerSite)
+                session.joeSiteResult = joeFinal
+                session.ignitionSiteResult = ignFinal
+                onLog("Worker \(sessionId): EXHAUSTED — \(joeFinal.shortLabel) | \(ignFinal.shortLabel)", .error)
                 await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .finalState)
 
             case .uncertain:
@@ -184,10 +193,12 @@ class DualSiteWorkerService {
                     session.classification = .noAccount
                     session.identityAction = .save
                     session.endTime = Date()
-                    onLog("Worker \(sessionId): UNCERTAIN after max attempts — marking no account", .warning)
+                    session.joeSiteResult = SiteResult.fromLoginOutcome(joeOutcome, registeredAttempts: joeRegistered, maxAttempts: config.maxAttemptsPerSite)
+                    session.ignitionSiteResult = SiteResult.fromLoginOutcome(ignOutcome, registeredAttempts: ignRegistered, maxAttempts: config.maxAttemptsPerSite)
+                    onLog("Worker \(sessionId): UNCERTAIN max — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .warning)
                     await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .finalState)
                 } else {
-                    onLog("Worker \(sessionId): uncertain result on attempt \(attemptNum) — retrying", .warning)
+                    onLog("Worker \(sessionId): uncertain attempt \(attemptNum) — retrying", .warning)
                 }
             }
 
@@ -201,6 +212,12 @@ class DualSiteWorkerService {
             session.classification = .noAccount
             session.identityAction = .save
             session.endTime = Date()
+            if session.joeSiteResult == .pending {
+                session.joeSiteResult = .unsure
+            }
+            if session.ignitionSiteResult == .pending {
+                session.ignitionSiteResult = .unsure
+            }
             onUpdate(session)
         }
 

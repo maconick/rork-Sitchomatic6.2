@@ -23,9 +23,10 @@ struct UnifiedSessionFeedView: View {
         case all = "All"
         case active = "Active"
         case success = "Success"
-        case permBan = "Perm Ban"
-        case tempLock = "Temp Lock"
+        case permBan = "Perm Dis"
+        case tempLock = "Temp Dis"
         case noAccount = "No Acc"
+        case unsure = "Unsure"
         var id: String { rawValue }
 
         var color: Color {
@@ -36,6 +37,18 @@ struct UnifiedSessionFeedView: View {
             case .permBan: .red
             case .tempLock: .orange
             case .noAccount: .secondary
+            case .unsure: .yellow
+            }
+        }
+
+        var matchingSiteResult: SiteResult? {
+            switch self {
+            case .all, .active: nil
+            case .success: .success
+            case .permBan: .permDisabled
+            case .tempLock: .tempDisabled
+            case .noAccount: .noAccount
+            case .unsure: .unsure
             }
         }
     }
@@ -44,10 +57,9 @@ struct UnifiedSessionFeedView: View {
         switch filterOption {
         case .all: vm.sessions
         case .active: vm.activeSessions
-        case .success: vm.successSessions
-        case .permBan: vm.permBannedSessions
-        case .tempLock: vm.tempLockedSessions
-        case .noAccount: vm.noAccountSessions
+        default:
+            guard let target = filterOption.matchingSiteResult else { return vm.sessions }
+            return vm.sessions.filter { $0.hasSiteResult(target) }
         }
     }
 
@@ -55,10 +67,9 @@ struct UnifiedSessionFeedView: View {
         switch option {
         case .all: vm.sessions.count
         case .active: vm.activeSessions.count
-        case .success: vm.successSessions.count
-        case .permBan: vm.permBannedSessions.count
-        case .tempLock: vm.tempLockedSessions.count
-        case .noAccount: vm.noAccountSessions.count
+        default:
+            guard let target = option.matchingSiteResult else { return 0 }
+            return vm.sessions.filter { $0.hasSiteResult(target) }.count
         }
     }
 
@@ -453,10 +464,10 @@ struct UnifiedSessionFeedView: View {
 
     private var statsRow: some View {
         HStack(spacing: 8) {
-            UnifiedMiniStat(value: "\(vm.successSessions.count)", label: "Success", color: .green, icon: "checkmark.circle.fill")
-            UnifiedMiniStat(value: "\(vm.permBannedSessions.count)", label: "Perm", color: .red, icon: "lock.slash.fill")
-            UnifiedMiniStat(value: "\(vm.tempLockedSessions.count)", label: "Temp", color: .orange, icon: "clock.badge.exclamationmark")
-            UnifiedMiniStat(value: "\(vm.noAccountSessions.count)", label: "No Acc", color: .secondary, icon: "xmark.circle.fill")
+            UnifiedMiniStat(value: "\(vm.sessionsWithSiteResult(.success).count)", label: "Success", color: .green, icon: "checkmark.circle.fill")
+            UnifiedMiniStat(value: "\(vm.sessionsWithSiteResult(.permDisabled).count)", label: "Perm", color: .red, icon: "lock.slash.fill")
+            UnifiedMiniStat(value: "\(vm.sessionsWithSiteResult(.tempDisabled).count)", label: "Temp", color: .orange, icon: "clock.badge.exclamationmark")
+            UnifiedMiniStat(value: "\(vm.sessionsWithSiteResult(.noAccount).count)", label: "No Acc", color: .secondary, icon: "xmark.circle.fill")
         }
     }
 
@@ -597,41 +608,17 @@ struct UnifiedSessionFeedView: View {
                     }
                 }
 
-                Section("Export by Classification") {
-                    if !vm.successSessions.isEmpty {
-                        Button {
-                            UIPasteboard.general.string = vm.exportByClassification(.validAccount)
-                            showExportSheet = false
-                        } label: {
-                            Label("Success (\(vm.successSessions.count))", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                    }
-                    if !vm.tempLockedSessions.isEmpty {
-                        Button {
-                            UIPasteboard.general.string = vm.exportByClassification(.temporaryLock)
-                            showExportSheet = false
-                        } label: {
-                            Label("Temp Locked (\(vm.tempLockedSessions.count))", systemImage: "clock.badge.exclamationmark")
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    if !vm.permBannedSessions.isEmpty {
-                        Button {
-                            UIPasteboard.general.string = vm.exportByClassification(.permanentBan)
-                            showExportSheet = false
-                        } label: {
-                            Label("Perm Banned (\(vm.permBannedSessions.count))", systemImage: "lock.slash.fill")
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    if !vm.noAccountSessions.isEmpty {
-                        Button {
-                            UIPasteboard.general.string = vm.exportByClassification(.noAccount)
-                            showExportSheet = false
-                        } label: {
-                            Label("No Account (\(vm.noAccountSessions.count))", systemImage: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                Section("Export by Site Result") {
+                    ForEach([SiteResult.success, .permDisabled, .tempDisabled, .noAccount, .unsure], id: \.rawValue) { result in
+                        let matching = vm.sessionsWithSiteResult(result)
+                        if !matching.isEmpty {
+                            Button {
+                                UIPasteboard.general.string = vm.exportBySiteResult(result)
+                                showExportSheet = false
+                            } label: {
+                                Label("\(result.shortLabel) (\(matching.count))", systemImage: result.icon)
+                                    .foregroundStyle(result.color)
+                            }
                         }
                     }
                 }
@@ -664,7 +651,7 @@ struct PairedSessionTile: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                classificationIcon
+                pairedIcon
                     .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -680,7 +667,7 @@ struct PairedSessionTile: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 4) {
-                    classificationBadge
+                    pairedBadge
                     if session.isTerminal {
                         Text(session.formattedDuration)
                             .font(.system(.caption2, design: .monospaced))
@@ -705,6 +692,7 @@ struct PairedSessionTile: View {
                     icon: "suit.spade.fill",
                     name: "JOE",
                     color: .green,
+                    result: session.joeSiteResult,
                     attempts: session.joeAttempts,
                     maxAttempts: session.maxAttempts
                 )
@@ -713,6 +701,7 @@ struct PairedSessionTile: View {
                     icon: "flame.fill",
                     name: "IGN",
                     color: .orange,
+                    result: session.ignitionSiteResult,
                     attempts: session.ignitionAttempts,
                     maxAttempts: session.maxAttempts
                 )
@@ -744,7 +733,7 @@ struct PairedSessionTile: View {
         .clipShape(.rect(cornerRadius: 12))
     }
 
-    private func siteProgressBar(icon: String, name: String, color: Color, attempts: [SiteAttemptResult], maxAttempts: Int) -> some View {
+    private func siteProgressBar(icon: String, name: String, color: Color, result: SiteResult, attempts: [SiteAttemptResult], maxAttempts: Int) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .bold))
@@ -752,6 +741,15 @@ struct PairedSessionTile: View {
             Text(name)
                 .font(.system(size: 9, weight: .heavy, design: .monospaced))
                 .foregroundStyle(color)
+            if result.isTerminal {
+                Text(result.shortLabel)
+                    .font(.system(size: 7, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(result.color)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(result.color.opacity(0.15))
+                    .clipShape(Capsule())
+            }
             Spacer()
             HStack(spacing: 3) {
                 ForEach(0..<maxAttempts, id: \.self) { i in
@@ -767,59 +765,97 @@ struct PairedSessionTile: View {
         .clipShape(.rect(cornerRadius: 8))
     }
 
-    private var classificationIcon: some View {
-        let (icon, color, bg) = classificationIconInfo
-        return ZStack {
-            Circle()
-                .fill(bg)
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(color)
-        }
-    }
-
-    private var classificationIconInfo: (String, Color, Color) {
-        switch session.classification {
-        case .validAccount:
-            ("checkmark.circle.fill", .green, .green.opacity(0.15))
-        case .permanentBan:
-            ("lock.slash.fill", .red, .red.opacity(0.15))
-        case .temporaryLock:
-            ("clock.badge.exclamationmark", .orange, .orange.opacity(0.15))
-        case .noAccount:
-            ("xmark.circle.fill", .secondary, Color(.tertiarySystemFill))
-        case .pending:
-            if session.globalState == .active && session.currentAttempt > 0 {
-                ("bolt.fill", .cyan, .cyan.opacity(0.15))
+    private var pairedIcon: some View {
+        Group {
+            if !session.isTerminal {
+                ZStack {
+                    Circle()
+                        .fill(session.currentAttempt > 0 ? Color.cyan.opacity(0.15) : Color(.tertiarySystemFill))
+                    Image(systemName: session.currentAttempt > 0 ? "bolt.fill" : "clock")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(session.currentAttempt > 0 ? .cyan : .secondary)
+                }
             } else {
-                ("clock", .secondary, Color(.tertiarySystemFill))
+                let highest = session.highestPriorityResult
+                ZStack {
+                    if session.hasMixedResults {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [session.joeSiteResult.color.opacity(0.2), session.ignitionSiteResult.color.opacity(0.2)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    } else {
+                        Circle()
+                            .fill(highest.color.opacity(0.15))
+                    }
+                    Image(systemName: highest.icon)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(highest.color)
+                }
             }
         }
     }
 
-    private var classificationBadge: some View {
-        let (text, color) = classificationBadgeInfo
-        return Text(text)
-            .font(.system(.caption2, design: .monospaced, weight: .bold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    private var classificationBadgeInfo: (String, Color) {
-        switch session.classification {
-        case .validAccount: return ("SUCCESS", .green)
-        case .permanentBan: return ("PERM BAN", .red)
-        case .temporaryLock: return ("TEMP LOCK", .orange)
-        case .noAccount: return ("NO ACC", .secondary)
-        case .pending:
-            if session.globalState == .active && session.currentAttempt > 0 {
-                return ("TESTING", .cyan)
-            }
-            return ("QUEUED", .secondary)
+    @ViewBuilder
+    private var pairedBadge: some View {
+        if !session.isTerminal {
+            let isActive = session.globalState == .active && session.currentAttempt > 0
+            Text(isActive ? "TESTING" : "QUEUED")
+                .font(.system(.caption2, design: .monospaced, weight: .bold))
+                .foregroundStyle(isActive ? .cyan : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background((isActive ? Color.cyan : Color.secondary).opacity(0.12))
+                .clipShape(Capsule())
+        } else if session.hasMixedResults {
+            SplitColorBadge(
+                joeResult: session.joeSiteResult,
+                ignitionResult: session.ignitionSiteResult
+            )
+        } else {
+            let result = session.highestPriorityResult
+            Text(result.pluralLabel)
+                .font(.system(.caption2, design: .monospaced, weight: .bold))
+                .foregroundStyle(result.color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(result.color.opacity(0.12))
+                .clipShape(Capsule())
         }
+    }
+}
+
+struct SplitColorBadge: View {
+    let joeResult: SiteResult
+    let ignitionResult: SiteResult
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(joeResult.shortLabel)
+                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                .foregroundStyle(joeResult.color)
+                .padding(.leading, 7)
+                .padding(.trailing, 3)
+                .padding(.vertical, 3)
+                .background(joeResult.color.opacity(0.12))
+
+            Rectangle()
+                .fill(.quaternary)
+                .frame(width: 1)
+                .padding(.vertical, 2)
+
+            Text(ignitionResult.shortLabel)
+                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                .foregroundStyle(ignitionResult.color)
+                .padding(.leading, 3)
+                .padding(.trailing, 7)
+                .padding(.vertical, 3)
+                .background(ignitionResult.color.opacity(0.12))
+        }
+        .clipShape(Capsule())
     }
 }
 
@@ -830,6 +866,15 @@ struct UnifiedSessionDetailSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    HStack(spacing: 16) {
+                        siteResultPill(icon: "suit.spade.fill", name: "Joe", result: session.joeSiteResult, siteColor: .green)
+                        siteResultPill(icon: "flame.fill", name: "Ignition", result: session.ignitionSiteResult, siteColor: .orange)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                }
+
                 Section("Credential") {
                     LabeledContent("Email") {
                         Text(session.credential.email)
@@ -839,10 +884,10 @@ struct UnifiedSessionDetailSheet: View {
                         Text(session.credential.maskedPassword)
                             .font(.system(.caption, design: .monospaced))
                     }
-                    LabeledContent("Classification") {
-                        Text(session.classification.rawValue)
-                            .font(.caption.bold())
-                            .foregroundStyle(classificationColor)
+                    LabeledContent("Paired Result") {
+                        Text(session.pairedBadgeText)
+                            .font(.system(.caption, design: .monospaced, weight: .bold))
+                            .foregroundStyle(session.highestPriorityResult.color)
                     }
                     LabeledContent("Duration", value: session.formattedDuration)
                     LabeledContent("Identity Action") {
@@ -870,7 +915,7 @@ struct UnifiedSessionDetailSheet: View {
                     }
                 }
 
-                Section("Joe Fortune Attempts (\(session.joeAttempts.count)/\(session.maxAttempts))") {
+                Section("Joe Fortune — \(session.joeSiteResult.shortLabel) (\(session.joeAttempts.count)/\(session.maxAttempts))") {
                     if session.joeAttempts.isEmpty {
                         Text("No attempts yet").foregroundStyle(.secondary)
                     } else {
@@ -880,7 +925,7 @@ struct UnifiedSessionDetailSheet: View {
                     }
                 }
 
-                Section("Ignition Attempts (\(session.ignitionAttempts.count)/\(session.maxAttempts))") {
+                Section("Ignition — \(session.ignitionSiteResult.shortLabel) (\(session.ignitionAttempts.count)/\(session.maxAttempts))") {
                     if session.ignitionAttempts.isEmpty {
                         Text("No attempts yet").foregroundStyle(.secondary)
                     } else {
@@ -915,6 +960,34 @@ struct UnifiedSessionDetailSheet: View {
         .presentationContentInteraction(.scrolls)
     }
 
+    private func siteResultPill(icon: String, name: String, result: SiteResult, siteColor: Color) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(siteColor)
+                Text(name)
+                    .font(.system(.caption, design: .monospaced, weight: .bold))
+                    .foregroundStyle(siteColor)
+            }
+            HStack(spacing: 5) {
+                Image(systemName: result.icon)
+                    .font(.system(size: 11, weight: .bold))
+                Text(result.shortLabel)
+                    .font(.system(.caption2, design: .monospaced, weight: .heavy))
+            }
+            .foregroundStyle(result.color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(result.color.opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(.rect(cornerRadius: 12))
+    }
+
     private func attemptRow(_ attempt: SiteAttemptResult, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -932,16 +1005,6 @@ struct UnifiedSessionDetailSheet: View {
                 .lineLimit(2)
         }
         .padding(.vertical, 2)
-    }
-
-    private var classificationColor: Color {
-        switch session.classification {
-        case .validAccount: .green
-        case .permanentBan: .red
-        case .temporaryLock: .orange
-        case .noAccount: .secondary
-        case .pending: .cyan
-        }
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 nonisolated enum SessionGlobalState: String, Codable, Sendable {
     case active = "ACTIVE"
@@ -14,6 +15,94 @@ nonisolated enum SessionClassification: String, Codable, Sendable {
     case temporaryLock = "Temporary Lock"
     case noAccount = "No Account"
     case pending = "Pending"
+}
+
+nonisolated enum SiteResult: String, Codable, Sendable, CaseIterable {
+    case success = "Success"
+    case noAccount = "No Acc"
+    case permDisabled = "Perm Disabled"
+    case tempDisabled = "Temp Disabled"
+    case unsure = "Unsure"
+    case pending = "Pending"
+
+    var shortLabel: String {
+        switch self {
+        case .success: "SUCCESS"
+        case .noAccount: "NO ACC"
+        case .permDisabled: "PERM DIS"
+        case .tempDisabled: "TEMP DIS"
+        case .unsure: "UNSURE"
+        case .pending: "PENDING"
+        }
+    }
+
+    var pluralLabel: String {
+        switch self {
+        case .success: "SUCCESS"
+        case .noAccount: "NO ACCOUNTS"
+        case .permDisabled: "PERM DISABLED"
+        case .tempDisabled: "TEMP DISABLED"
+        case .unsure: "UNSURE"
+        case .pending: "PENDING"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .success: .green
+        case .noAccount: .secondary
+        case .permDisabled: .red
+        case .tempDisabled: .orange
+        case .unsure: .yellow
+        case .pending: .cyan
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .success: "checkmark.circle.fill"
+        case .noAccount: "xmark.circle.fill"
+        case .permDisabled: "lock.slash.fill"
+        case .tempDisabled: "clock.badge.exclamationmark"
+        case .unsure: "questionmark.circle.fill"
+        case .pending: "clock"
+        }
+    }
+
+    var isTerminal: Bool {
+        switch self {
+        case .pending: false
+        default: true
+        }
+    }
+
+    var priority: Int {
+        switch self {
+        case .success: 5
+        case .permDisabled: 4
+        case .tempDisabled: 3
+        case .noAccount: 2
+        case .unsure: 1
+        case .pending: 0
+        }
+    }
+
+    static func fromLoginOutcome(_ outcome: LoginOutcome, registeredAttempts: Int, maxAttempts: Int) -> SiteResult {
+        switch outcome {
+        case .success: return .success
+        case .permDisabled: return .permDisabled
+        case .tempDisabled: return .tempDisabled
+        case .noAcc:
+            if registeredAttempts >= 3 {
+                return .noAccount
+            }
+            return .unsure
+        case .unsure, .redBannerError, .smsDetected:
+            return .unsure
+        case .connectionFailure, .timeout:
+            return .unsure
+        }
+    }
 }
 
 nonisolated enum IdentityAction: String, Codable, Sendable {
@@ -73,6 +162,8 @@ struct DualSiteSession: Identifiable, Codable, Sendable {
     var identityAction: IdentityAction
     var joeAttempts: [SiteAttemptResult]
     var ignitionAttempts: [SiteAttemptResult]
+    var joeSiteResult: SiteResult
+    var ignitionSiteResult: SiteResult
     var currentAttempt: Int
     let maxAttempts: Int
     let startTime: Date
@@ -96,6 +187,32 @@ struct DualSiteSession: Identifiable, Codable, Sendable {
         return String(format: "%.0fm %02.0fs", (d / 60).rounded(.down), d.truncatingRemainder(dividingBy: 60))
     }
 
+    var hasMixedResults: Bool {
+        guard joeSiteResult.isTerminal && ignitionSiteResult.isTerminal else { return false }
+        return joeSiteResult != ignitionSiteResult
+    }
+
+    var highestPriorityResult: SiteResult {
+        joeSiteResult.priority >= ignitionSiteResult.priority ? joeSiteResult : ignitionSiteResult
+    }
+
+    var pairedBadgeText: String {
+        guard isTerminal else {
+            if globalState == .active && currentAttempt > 0 {
+                return "TESTING"
+            }
+            return "QUEUED"
+        }
+        if joeSiteResult == ignitionSiteResult {
+            return joeSiteResult.pluralLabel
+        }
+        return "\(joeSiteResult.shortLabel) | \(ignitionSiteResult.shortLabel)"
+    }
+
+    func hasSiteResult(_ result: SiteResult) -> Bool {
+        joeSiteResult == result || ignitionSiteResult == result
+    }
+
     static func create(credential: SessionCredential, identity: SessionIdentity) -> DualSiteSession {
         DualSiteSession(
             id: UUID().uuidString,
@@ -106,6 +223,8 @@ struct DualSiteSession: Identifiable, Codable, Sendable {
             identityAction: .save,
             joeAttempts: [],
             ignitionAttempts: [],
+            joeSiteResult: .pending,
+            ignitionSiteResult: .pending,
             currentAttempt: 0,
             maxAttempts: 4,
             startTime: Date(),

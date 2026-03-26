@@ -287,10 +287,14 @@ class UnifiedSessionViewModel {
         persistSessions()
     }
 
+    func sessionsWithSiteResult(_ result: SiteResult) -> [DualSiteSession] {
+        sessions.filter { $0.hasSiteResult(result) }
+    }
+
     func exportResults() -> String {
-        var lines: [String] = ["email,classification,joe_attempts,ign_attempts,duration,identity_action"]
+        var lines: [String] = ["email,joe_result,ignition_result,paired_result,joe_attempts,ign_attempts,duration,identity_action"]
         for session in sessions where session.isTerminal {
-            lines.append("\(session.credential.email),\(session.classification.rawValue),\(session.joeAttempts.count),\(session.ignitionAttempts.count),\(session.formattedDuration),\(session.identityAction.rawValue)")
+            lines.append("\(session.credential.email),\(session.joeSiteResult.shortLabel),\(session.ignitionSiteResult.shortLabel),\(session.pairedBadgeText),\(session.joeAttempts.count),\(session.ignitionAttempts.count),\(session.formattedDuration),\(session.identityAction.rawValue)")
         }
         return lines.joined(separator: "\n")
     }
@@ -302,11 +306,18 @@ class UnifiedSessionViewModel {
             .joined(separator: "\n")
     }
 
+    func exportBySiteResult(_ result: SiteResult) -> String {
+        sessions
+            .filter { $0.hasSiteResult(result) }
+            .map { "\($0.credential.email):\($0.credential.password)" }
+            .joined(separator: "\n")
+    }
+
     private func finalizeBatch() {
-        let success = successSessions.count
-        let perm = permBannedSessions.count
-        let temp = tempLockedSessions.count
-        let noAcc = noAccountSessions.count
+        let success = sessionsWithSiteResult(.success).count
+        let perm = sessionsWithSiteResult(.permDisabled).count
+        let temp = sessionsWithSiteResult(.tempDisabled).count
+        let noAcc = sessionsWithSiteResult(.noAccount).count
 
         cancelPauseCountdown()
         forceStopTask?.cancel()
