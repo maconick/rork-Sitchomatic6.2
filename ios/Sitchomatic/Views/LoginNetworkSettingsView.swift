@@ -7,9 +7,7 @@ struct LoginNetworkSettingsView: View {
     @State private var showURLManager: Bool = false
     @State private var isValidatingURLs: Bool = false
 
-    private var accentColor: Color {
-        vm.isIgnitionMode ? .orange : .green
-    }
+    private var accentColor: Color { .green }
 
     var body: some View {
         List {
@@ -68,7 +66,7 @@ struct LoginNetworkSettingsView: View {
                     Text("\(vm.urlRotation.enabledURLs.count) of \(vm.urlRotation.activeURLs.count) URLs enabled").font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(vm.isIgnitionMode ? "Ignition" : "Joe")
+                Text("Unified")
                     .font(.system(.caption, design: .monospaced, weight: .bold))
                     .foregroundStyle(accentColor)
                     .padding(.horizontal, 8).padding(.vertical, 4)

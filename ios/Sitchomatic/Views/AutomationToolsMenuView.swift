@@ -3,9 +3,7 @@ import SwiftUI
 struct AutomationToolsMenuView: View {
     let vm: LoginViewModel
 
-    private var accentColor: Color {
-        vm.isIgnitionMode ? .orange : .green
-    }
+    private var accentColor: Color { .green }
 
     var body: some View {
         List {

@@ -6,9 +6,7 @@ struct LoginSettingsContentView: View {
     @State private var showSelectTesting: Bool = false
     @State private var selectedCredentialIds: Set<String> = []
 
-    private var accentColor: Color {
-        vm.isIgnitionMode ? .orange : .green
-    }
+    private var accentColor: Color { .green }
 
     var body: some View {
         List {
@@ -221,22 +219,9 @@ struct LoginSettingsContentView: View {
                 HStack(spacing: 10) { Image(systemName: "paintbrush.fill").foregroundStyle(.purple); Text("Appearance") }
             }
 
-            if vm.isIgnitionMode {
-                HStack(spacing: 10) {
-                    Image(systemName: "moon.fill").foregroundStyle(.orange)
-                    Text("Ignition Dark Mode")
-                    Spacer()
-                    Text("Active").font(.caption.bold()).foregroundStyle(.orange)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.orange.opacity(0.12)).clipShape(Capsule())
-                }
-            }
+
         } header: {
             Text("Appearance")
-        } footer: {
-            if vm.isIgnitionMode {
-                Text("Dark mode is forced while in Ignition mode.")
-            }
         }
     }
 

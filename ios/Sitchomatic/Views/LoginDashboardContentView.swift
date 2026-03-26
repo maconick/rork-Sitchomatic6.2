@@ -14,9 +14,7 @@ struct LoginDashboardContentView: View {
             LazyVStack(spacing: 20) {
                 statusHeader
                 NetworkTruthPanelView()
-                if vm.isIgnitionMode {
-                    regionToggle
-                }
+
                 dashboardActionButtons
                 if vm.isRunning {
                     testingBanner
@@ -66,7 +64,7 @@ struct LoginDashboardContentView: View {
             HStack(spacing: 12) {
                 Image(systemName: vm.urlRotation.currentIcon)
                     .font(.system(size: 32))
-                    .foregroundStyle(vm.isIgnitionMode ? .orange : .green)
+                    .foregroundStyle(.green)
                     .symbolEffect(.pulse, isActive: vm.isRunning)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -200,42 +198,9 @@ struct LoginDashboardContentView: View {
         }
     }
 
-    private var accentColor: Color {
-        vm.isIgnitionMode ? .orange : .green
-    }
+    private var accentColor: Color { .green }
 
-    private var regionToggle: some View {
-        HStack(spacing: 12) {
-            Image(systemName: proxyService.networkRegion == .usa ? "flag.fill" : "globe.asia.australia.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(proxyService.networkRegion == .usa ? .blue : .orange)
-                .frame(width: 28)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Region")
-                    .font(.subheadline.bold())
-                Text(proxyService.networkRegion.label)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Picker("", selection: Binding(
-                get: { proxyService.networkRegion },
-                set: { proxyService.networkRegion = $0 }
-            )) {
-                Text("USA").tag(NetworkRegion.usa)
-                Text("AU").tag(NetworkRegion.au)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 120)
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(.rect(cornerRadius: 12))
-        .sensoryFeedback(.impact(weight: .medium), trigger: proxyService.networkRegion)
-    }
 
     private var stealthBadge: some View {
         HStack(spacing: 8) {

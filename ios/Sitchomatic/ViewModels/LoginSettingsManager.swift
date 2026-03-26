@@ -11,9 +11,6 @@ class LoginSettingsManager {
     var maxConcurrency: Int = 8
     var savedCropRect: CGRect? = nil
     var automationSettings: AutomationSettings = AutomationSettings()
-    var doubleSiteMode: Bool = false
-    var siteMode: LoginViewModel.SiteMode = .joe
-
     let urlRotation = LoginURLRotationService.shared
 
     private let persistence = LoginPersistenceService.shared
@@ -21,33 +18,8 @@ class LoginSettingsManager {
     private let automationSettingsKey = "automation_settings_v1"
     var onLog: ((String, PPSRLogEntry.Level) -> Void)?
 
-    var isIgnitionMode: Bool {
-        get { urlRotation.isIgnitionMode }
-        set {
-            urlRotation.isIgnitionMode = newValue
-            targetSite = newValue ? .ignition : .joefortune
-            persistSettings()
-        }
-    }
-
     var effectiveColorScheme: ColorScheme? {
-        if isIgnitionMode { return .dark }
-        return appearanceMode.colorScheme
-    }
-
-    func setSiteMode(_ mode: LoginViewModel.SiteMode) {
-        siteMode = mode
-        switch mode {
-        case .joe:
-            isIgnitionMode = false
-            doubleSiteMode = false
-        case .double:
-            doubleSiteMode = true
-        case .ignition:
-            isIgnitionMode = true
-            doubleSiteMode = false
-        }
-        persistSettings()
+        appearanceMode.colorScheme
     }
 
     func loadPersistedSettings() {

@@ -28,7 +28,7 @@ class RunCommandViewModel {
 
     var siteLabel: String {
         switch activeMode {
-        case .login: loginVM.batchSiteLabel.isEmpty ? loginVM.siteMode.rawValue : loginVM.batchSiteLabel
+        case .login: loginVM.batchSiteLabel.isEmpty ? "Login Testing" : loginVM.batchSiteLabel
         case .ppsr: "PPSR"
         case .none: ""
         }
@@ -36,12 +36,7 @@ class RunCommandViewModel {
 
     var siteIcon: String {
         switch activeMode {
-        case .login:
-            switch loginVM.siteMode {
-            case .joe: "suit.spade.fill"
-            case .double: "arrow.triangle.branch"
-            case .ignition: "flame.fill"
-            }
+        case .login: "rectangle.split.2x1.fill"
         case .ppsr: "bolt.shield.fill"
         case .none: "circle"
         }
@@ -49,12 +44,7 @@ class RunCommandViewModel {
 
     var siteColor: Color {
         switch activeMode {
-        case .login:
-            switch loginVM.siteMode {
-            case .joe: .green
-            case .double: .cyan
-            case .ignition: .orange
-            }
+        case .login: .green
         case .ppsr: .teal
         case .none: .secondary
         }

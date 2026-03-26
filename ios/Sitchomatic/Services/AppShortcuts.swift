@@ -31,26 +31,14 @@ nonisolated struct OpenPPSRModeIntent: AppIntent {
     }
 }
 
-nonisolated struct OpenJoeModeIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open Joe Mode"
-    static var description: IntentDescription = "Open the Joe Fortune login testing mode"
+nonisolated struct OpenLoginTestingIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open Login Testing"
+    static var description: IntentDescription = "Open the unified login testing mode (Joe Fortune + Ignition)"
     static var openAppWhenRun: Bool = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        UserDefaults.standard.set("joe", forKey: "activeAppMode")
-        return .result()
-    }
-}
-
-nonisolated struct OpenIgnitionModeIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open Ignition Mode"
-    static var description: IntentDescription = "Open the Ignition Casino login testing mode"
-    static var openAppWhenRun: Bool = true
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        UserDefaults.standard.set("ignition", forKey: "activeAppMode")
+        UserDefaults.standard.set("unifiedSession", forKey: "activeAppMode")
         return .result()
     }
 }
@@ -67,7 +55,7 @@ nonisolated struct OpenNordConfigIntent: AppIntent {
     }
 }
 
-nonisolated struct DualModeAppShortcuts: AppShortcutsProvider {
+nonisolated struct SitchomaticAppShortcuts: AppShortcutsProvider {
     @AppShortcutsBuilder
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -89,20 +77,13 @@ nonisolated struct DualModeAppShortcuts: AppShortcutsProvider {
             systemImageName: "bolt.shield.fill"
         )
         AppShortcut(
-            intent: OpenJoeModeIntent(),
+            intent: OpenLoginTestingIntent(),
             phrases: [
-                "Open Joe mode in \(.applicationName)"
+                "Open Login Testing in \(.applicationName)",
+                "Start login test in \(.applicationName)"
             ],
-            shortTitle: "Open Joe",
-            systemImageName: "flame.fill"
-        )
-        AppShortcut(
-            intent: OpenIgnitionModeIntent(),
-            phrases: [
-                "Open Ignition mode in \(.applicationName)"
-            ],
-            shortTitle: "Open Ignition",
-            systemImageName: "flame.circle.fill"
+            shortTitle: "Login Testing",
+            systemImageName: "rectangle.split.2x1.fill"
         )
         AppShortcut(
             intent: OpenNordConfigIntent(),

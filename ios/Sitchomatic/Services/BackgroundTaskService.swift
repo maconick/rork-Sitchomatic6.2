@@ -45,13 +45,7 @@ class BackgroundTaskService {
 
             let siteMode: String
             switch vm.activeMode {
-            case .login:
-                let loginVM = LoginViewModel.shared
-                switch loginVM.siteMode {
-                case .joe: siteMode = "joe"
-                case .ignition: siteMode = "ignition"
-                case .double: siteMode = "double"
-                }
+            case .login: siteMode = "unified"
             case .ppsr: siteMode = "ppsr"
             case .none: siteMode = "none"
             }
@@ -78,13 +72,7 @@ class BackgroundTaskService {
             let vm = RunCommandViewModel.shared
             let siteMode: String
             switch vm.activeMode {
-            case .login:
-                let loginVM = LoginViewModel.shared
-                switch loginVM.siteMode {
-                case .joe: siteMode = "joe"
-                case .ignition: siteMode = "ignition"
-                case .double: siteMode = "double"
-                }
+            case .login: siteMode = "unified"
             case .ppsr: siteMode = "ppsr"
             case .none: siteMode = "none"
             }

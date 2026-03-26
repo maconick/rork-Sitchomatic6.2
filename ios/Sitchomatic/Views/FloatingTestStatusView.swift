@@ -18,24 +18,12 @@ struct FloatingTestStatusView: View {
     }
 
     private var siteIcon: String {
-        if isLoginRunning {
-            switch loginVM.siteMode {
-            case .joe: return "suit.spade.fill"
-            case .double: return "arrow.triangle.branch"
-            case .ignition: return "flame.fill"
-            }
-        }
+        if isLoginRunning { return "rectangle.split.2x1.fill" }
         return "bolt.shield.fill"
     }
 
     private var siteColor: Color {
-        if isLoginRunning {
-            switch loginVM.siteMode {
-            case .joe: return .green
-            case .double: return .cyan
-            case .ignition: return .orange
-            }
-        }
+        if isLoginRunning { return .green }
         return .teal
     }
 

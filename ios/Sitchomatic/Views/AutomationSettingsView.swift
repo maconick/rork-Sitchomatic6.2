@@ -32,9 +32,7 @@ struct AutomationSettingsView: View {
     private let calibrationService = LoginCalibrationService.shared
     private let proxyService = ProxyRotationService.shared
 
-    private var accentColor: Color {
-        vm.isIgnitionMode ? .orange : .green
-    }
+    private var accentColor: Color { .green }
 
     @State private var autoSaveEnabled: Bool = true
     @State private var lastSaveTime: Date? = nil
