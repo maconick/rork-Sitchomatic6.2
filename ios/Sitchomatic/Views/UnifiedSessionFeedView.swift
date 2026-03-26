@@ -1,65 +1,183 @@
 import SwiftUI
+import UIKit
 
 struct UnifiedSessionFeedView: View {
     @State private var vm = UnifiedSessionViewModel.shared
     @State private var showImportSheet: Bool = false
+    @State private var showImportFromLogin: Bool = false
     @State private var importText: String = ""
+    @State private var filterOption: SessionFilterOption = .all
+    @State private var selectedSession: DualSiteSession?
+    @State private var showExportSheet: Bool = false
+    @State private var showClearConfirm: Bool = false
+    @State private var showLogSheet: Bool = false
+
+    nonisolated enum SessionFilterOption: String, CaseIterable, Identifiable, Sendable {
+        case all = "All"
+        case active = "Active"
+        case success = "Success"
+        case permBan = "Perm Ban"
+        case tempLock = "Temp Lock"
+        case noAccount = "No Acc"
+        var id: String { rawValue }
+
+        var color: Color {
+            switch self {
+            case .all: .primary
+            case .active: .cyan
+            case .success: .green
+            case .permBan: .red
+            case .tempLock: .orange
+            case .noAccount: .secondary
+            }
+        }
+    }
+
+    private var filteredSessions: [DualSiteSession] {
+        switch filterOption {
+        case .all: vm.sessions
+        case .active: vm.activeSessions
+        case .success: vm.successSessions
+        case .permBan: vm.permBannedSessions
+        case .tempLock: vm.tempLockedSessions
+        case .noAccount: vm.noAccountSessions
+        }
+    }
+
+    private func countFor(_ option: SessionFilterOption) -> Int {
+        switch option {
+        case .all: vm.sessions.count
+        case .active: vm.activeSessions.count
+        case .success: vm.successSessions.count
+        case .permBan: vm.permBannedSessions.count
+        case .tempLock: vm.tempLockedSessions.count
+        case .noAccount: vm.noAccountSessions.count
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 16) {
-                    statusHeader
-                    concurrencyControl
+            VStack(spacing: 0) {
+                if !vm.sessions.isEmpty {
+                    filterBar
+                }
 
-                    if vm.sessions.isEmpty {
-                        emptyState
-                    } else {
-                        statsRow
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        statusHeader
 
-                        if !vm.activeSessions.isEmpty {
-                            sessionSection(title: "Active", sessions: vm.activeSessions, color: .cyan, icon: "bolt.fill")
+                        if vm.isRunning {
+                            batchProgressCard
+                            batchControls
                         }
-                        if !vm.successSessions.isEmpty {
-                            sessionSection(title: "Success", sessions: vm.successSessions, color: .green, icon: "checkmark.circle.fill")
-                        }
-                        if !vm.permBannedSessions.isEmpty {
-                            sessionSection(title: "Permanent Disable", sessions: vm.permBannedSessions, color: .red, icon: "lock.slash.fill")
-                        }
-                        if !vm.tempLockedSessions.isEmpty {
-                            sessionSection(title: "Temp Disabled", sessions: vm.tempLockedSessions, color: .orange, icon: "clock.badge.exclamationmark")
-                        }
-                        if !vm.noAccountSessions.isEmpty {
-                            sessionSection(title: "No Account", sessions: vm.noAccountSessions, color: .secondary, icon: "xmark.circle.fill")
+
+                        concurrencyControl
+
+                        if vm.sessions.isEmpty {
+                            emptyState
+                        } else {
+                            statsRow
+
+                            ForEach(filteredSessions, id: \.id) { session in
+                                Button { selectedSession = session } label: {
+                                    PairedSessionTile(session: session)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
+                    .padding(.horizontal)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 32)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Unified Sessions")
+            .navigationTitle("Login Testing")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showImportSheet = true
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button { showLogSheet = true } label: {
+                            Label("View Logs", systemImage: "doc.text")
+                        }
+                        if !vm.completedSessions.isEmpty {
+                            Button { showExportSheet = true } label: {
+                                Label("Export Results", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                        if !vm.completedSessions.isEmpty {
+                            Button { vm.clearCompleted() } label: {
+                                Label("Clear Completed", systemImage: "trash")
+                            }
+                        }
+                        if !vm.sessions.isEmpty {
+                            Button(role: .destructive) { showClearConfirm = true } label: {
+                                Label("Clear All", systemImage: "trash.fill")
+                            }
+                        }
                     } label: {
-                        Image(systemName: "square.and.arrow.down")
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { showImportSheet = true } label: {
+                            Label("Paste Credentials", systemImage: "doc.on.clipboard")
+                        }
+                        Button { showImportFromLogin = true } label: {
+                            Label("Import from Login VM", systemImage: "arrow.down.circle")
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
                     }
                 }
             }
         }
         .withMainMenuButton()
         .preferredColorScheme(.dark)
+        .sheet(item: $selectedSession) { session in
+            UnifiedSessionDetailSheet(session: session, vm: vm)
+        }
         .sheet(isPresented: $showImportSheet) {
             importSheet
         }
-        .withBatchAlerts(
-            showBatchResult: .constant(false),
-            batchResult: nil,
-            isRunning: $vm.isRunning,
-            onDismissBatch: {}
-        )
+        .sheet(isPresented: $showLogSheet) {
+            unifiedLogSheet
+        }
+        .sheet(isPresented: $showExportSheet) {
+            exportSheet
+        }
+        .alert("Import from Login VM?", isPresented: $showImportFromLogin) {
+            Button("Import") { vm.importFromLoginVM() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will import all untested credentials from the Login Credentials list into the unified session queue.")
+        }
+        .alert("Clear All Sessions?", isPresented: $showClearConfirm) {
+            Button("Clear All", role: .destructive) { vm.clearSessions() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove all \(vm.sessions.count) session(s). This cannot be undone.")
+        }
+        .onChange(of: vm.isRunning) { _, newValue in
+            UIApplication.shared.isIdleTimerDisabled = newValue
+        }
+    }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(SessionFilterOption.allCases) { option in
+                    LoginSessionFilterChip(
+                        title: option.rawValue,
+                        count: countFor(option),
+                        isSelected: filterOption == option,
+                        color: option.color
+                    ) {
+                        withAnimation(.snappy) { filterOption = option }
+                    }
+                }
+            }
+            .padding(.horizontal).padding(.vertical, 10)
+        }
     }
 
     private var statusHeader: some View {
@@ -80,43 +198,169 @@ struct UnifiedSessionFeedView: View {
                             .foregroundStyle(.orange)
                     }
                 }
+                .symbolEffect(.pulse, options: .repeating.speed(0.3), isActive: vm.isRunning)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Unified Session V4.1")
+                    Text("Login Testing V4.1")
                         .font(.title3.bold())
-                    Text("Joe Fortune + Ignition · Paired Testing")
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Joe Fortune + Ignition")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        if vm.stealthEnabled {
+                            Text("STEALTH")
+                                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                                .foregroundStyle(.purple)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
 
                 Spacer()
 
                 if vm.isRunning {
-                    ProgressView()
-                        .tint(.cyan)
-                }
-            }
-
-            if vm.isRunning && !vm.sessions.isEmpty {
-                VStack(spacing: 4) {
-                    ProgressView(value: vm.batchProgress)
-                        .tint(.cyan)
-                    HStack {
-                        Text("\(vm.completedSessions.count)/\(vm.sessions.count) completed")
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(Int(vm.batchProgress * 100))%")
-                            .font(.system(.caption2, design: .monospaced, weight: .bold))
+                    VStack(spacing: 2) {
+                        Text("\(vm.activeWorkerCount)")
+                            .font(.system(.title2, design: .monospaced, weight: .bold))
                             .foregroundStyle(.cyan)
                             .contentTransition(.numericText())
+                        Text("active")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
+
+            Toggle(isOn: $vm.stealthEnabled) {
+                HStack(spacing: 6) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.caption)
+                        .foregroundStyle(.purple)
+                    Text("Stealth Mode")
+                        .font(.caption.bold())
+                }
+            }
+            .tint(.purple)
+            .disabled(vm.isRunning)
         }
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(.rect(cornerRadius: 14))
+    }
+
+    private var batchProgressCard: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .tint(.cyan)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text("Testing in Progress")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.cyan)
+                        if vm.isPaused {
+                            Text(vm.pauseCountdown > 0 ? "PAUSED \(vm.pauseCountdown)s" : "PAUSED")
+                                .font(.system(.caption2, design: .monospaced, weight: .heavy))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .clipShape(Capsule())
+                                .contentTransition(.numericText(value: Double(vm.pauseCountdown)))
+                                .animation(.snappy, value: vm.pauseCountdown)
+                        }
+                        if vm.isStopping {
+                            Text("STOPPING")
+                                .font(.system(.caption2, design: .monospaced, weight: .heavy))
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.red.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    Text("\(vm.activeWorkerCount) workers · \(vm.queuedSessions.count) queued · \(vm.completedSessions.count) done")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            VStack(spacing: 4) {
+                ProgressView(value: vm.batchProgress)
+                    .tint(.cyan)
+                HStack {
+                    Text("\(vm.completedSessions.count)/\(vm.sessions.count)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(vm.batchElapsed)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("\(Int(vm.batchProgress * 100))%")
+                        .font(.system(.caption2, design: .monospaced, weight: .bold))
+                        .foregroundStyle(.cyan)
+                        .contentTransition(.numericText())
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.cyan.opacity(0.06))
+        .clipShape(.rect(cornerRadius: 12))
+    }
+
+    private var batchControls: some View {
+        HStack(spacing: 10) {
+            if vm.isPaused {
+                Button { vm.resumeBatch() } label: {
+                    VStack(spacing: 4) {
+                        Label("Resume", systemImage: "play.fill")
+                            .font(.subheadline.bold())
+                        if vm.pauseCountdown > 0 {
+                            Text("Auto in \(vm.pauseCountdown)s")
+                                .font(.system(.caption2, design: .monospaced))
+                                .contentTransition(.numericText(value: Double(vm.pauseCountdown)))
+                                .animation(.snappy, value: vm.pauseCountdown)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.green.opacity(0.15))
+                    .foregroundStyle(.green)
+                    .clipShape(.rect(cornerRadius: 12))
+                }
+            } else {
+                Button { vm.pauseBatch() } label: {
+                    Label("Pause 60s", systemImage: "pause.fill")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundStyle(.orange)
+                        .clipShape(.rect(cornerRadius: 12))
+                }
+                .disabled(vm.isStopping)
+            }
+
+            Button { vm.stopBatch() } label: {
+                VStack(spacing: 4) {
+                    Label("Stop", systemImage: "stop.fill")
+                        .font(.subheadline.bold())
+                    Text("Finish active")
+                        .font(.caption2)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.red.opacity(0.15))
+                .foregroundStyle(.red)
+                .clipShape(.rect(cornerRadius: 12))
+            }
+            .disabled(vm.isStopping)
+        }
     }
 
     private var concurrencyControl: some View {
@@ -129,7 +373,7 @@ struct UnifiedSessionFeedView: View {
                     .font(.system(.caption, design: .monospaced, weight: .heavy))
                     .foregroundStyle(.cyan)
                 Spacer()
-                Text("\(vm.maxConcurrency) worker\(vm.maxConcurrency == 1 ? "" : "s")")
+                Text("\(vm.maxConcurrency)")
                     .font(.system(.caption2, design: .monospaced, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -140,9 +384,7 @@ struct UnifiedSessionFeedView: View {
 
             HStack(spacing: 6) {
                 Button {
-                    withAnimation(.spring(duration: 0.25)) {
-                        vm.maxConcurrency = max(1, vm.maxConcurrency - 1)
-                    }
+                    withAnimation(.spring(duration: 0.25)) { vm.maxConcurrency = max(1, vm.maxConcurrency - 1) }
                 } label: {
                     Image(systemName: "minus")
                         .font(.caption.bold())
@@ -151,31 +393,23 @@ struct UnifiedSessionFeedView: View {
                         .foregroundStyle(.primary)
                         .clipShape(.rect(cornerRadius: 8))
                 }
-                .disabled(vm.maxConcurrency <= 1)
+                .disabled(vm.maxConcurrency <= 1 || vm.isRunning)
 
                 GeometryReader { geo in
-                    let maxWorkers = 8
-                    let filledWidth = geo.size.width * CGFloat(vm.maxConcurrency) / CGFloat(maxWorkers)
+                    let filledWidth = geo.size.width * CGFloat(vm.maxConcurrency) / 8.0
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 6)
                             .fill(Color(.quaternarySystemFill))
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(
-                                LinearGradient(
-                                    colors: [.green, .orange],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
+                            .fill(LinearGradient(colors: [.green, .orange], startPoint: .leading, endPoint: .trailing))
                             .frame(width: filledWidth)
+                            .animation(.spring(duration: 0.3), value: vm.maxConcurrency)
                     }
                 }
                 .frame(height: 32)
 
                 Button {
-                    withAnimation(.spring(duration: 0.25)) {
-                        vm.maxConcurrency = min(8, vm.maxConcurrency + 1)
-                    }
+                    withAnimation(.spring(duration: 0.25)) { vm.maxConcurrency = min(8, vm.maxConcurrency + 1) }
                 } label: {
                     Image(systemName: "plus")
                         .font(.caption.bold())
@@ -184,61 +418,26 @@ struct UnifiedSessionFeedView: View {
                         .foregroundStyle(.primary)
                         .clipShape(.rect(cornerRadius: 8))
                 }
-                .disabled(vm.maxConcurrency >= 8)
+                .disabled(vm.maxConcurrency >= 8 || vm.isRunning)
             }
 
-            HStack(spacing: 10) {
-                if vm.isRunning {
-                    if vm.isPaused {
-                        Button { vm.resumeBatch() } label: {
-                            Label("Resume", systemImage: "play.fill")
-                                .font(.caption.bold())
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(Color.green.opacity(0.15))
-                                .foregroundStyle(.green)
-                                .clipShape(.rect(cornerRadius: 10))
-                        }
-                    } else {
-                        Button { vm.pauseBatch() } label: {
-                            Label("Pause", systemImage: "pause.fill")
-                                .font(.caption.bold())
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(Color.orange.opacity(0.15))
-                                .foregroundStyle(.orange)
-                                .clipShape(.rect(cornerRadius: 10))
-                        }
+            if !vm.isRunning {
+                Button { vm.startBatch() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                        Text("START LOGIN TEST")
+                            .font(.system(.caption, design: .monospaced, weight: .heavy))
                     }
-
-                    Button { vm.stopBatch() } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                            .font(.caption.bold())
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.red.opacity(0.15))
-                            .foregroundStyle(.red)
-                            .clipShape(.rect(cornerRadius: 10))
-                    }
-                    .disabled(vm.isStopping)
-                } else {
-                    Button { vm.startBatch() } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill")
-                            Text("START UNIFIED TEST")
-                                .font(.system(.caption, design: .monospaced, weight: .heavy))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            LinearGradient(colors: [.green, .orange], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .foregroundStyle(.black)
-                        .clipShape(.rect(cornerRadius: 10))
-                    }
-                    .disabled(vm.sessions.isEmpty || vm.pendingSessions.isEmpty)
-                    .sensoryFeedback(.impact(weight: .heavy), trigger: vm.isRunning)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        LinearGradient(colors: [.green, .orange], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .foregroundStyle(.black)
+                    .clipShape(.rect(cornerRadius: 10))
                 }
+                .disabled(vm.pendingSessions.isEmpty)
+                .sensoryFeedback(.impact(weight: .heavy), trigger: vm.isRunning)
             }
         }
         .padding(14)
@@ -253,30 +452,6 @@ struct UnifiedSessionFeedView: View {
             UnifiedMiniStat(value: "\(vm.permBannedSessions.count)", label: "Perm", color: .red, icon: "lock.slash.fill")
             UnifiedMiniStat(value: "\(vm.tempLockedSessions.count)", label: "Temp", color: .orange, icon: "clock.badge.exclamationmark")
             UnifiedMiniStat(value: "\(vm.noAccountSessions.count)", label: "No Acc", color: .secondary, icon: "xmark.circle.fill")
-        }
-    }
-
-    private func sessionSection(title: String, sessions: [DualSiteSession], color: Color, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.subheadline)
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.headline)
-                Spacer()
-                Text("\(sessions.count)")
-                    .font(.system(.caption, design: .monospaced, weight: .bold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.12))
-                    .clipShape(Capsule())
-                    .foregroundStyle(color)
-            }
-
-            ForEach(sessions) { session in
-                DualSessionRow(session: session)
-            }
         }
     }
 
@@ -295,16 +470,36 @@ struct UnifiedSessionFeedView: View {
             }
             .symbolEffect(.pulse.byLayer, options: .repeating)
 
-            Text("Unified Session Feed")
+            Text("Login Testing")
                 .font(.title3.bold())
             Text("Import credentials to begin paired testing.\nEach credential tests Joe Fortune + Ignition simultaneously\nwith shared proxy & fingerprint identity.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text("V4.1 — 4 concurrent workers · 4 attempts per site · Early-stop sync")
+            Text("V4.1 — \(vm.maxConcurrency) workers · 4 attempts · Early-stop sync")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.tertiary)
+
+            HStack(spacing: 12) {
+                Button { showImportSheet = true } label: {
+                    Label("Paste", systemImage: "doc.on.clipboard")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(.rect(cornerRadius: 10))
+                }
+
+                Button { showImportFromLogin = true } label: {
+                    Label("From Login VM", systemImage: "arrow.down.circle")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(.rect(cornerRadius: 10))
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
@@ -352,20 +547,128 @@ struct UnifiedSessionFeedView: View {
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
     }
+
+    private var unifiedLogSheet: some View {
+        NavigationStack {
+            List(vm.globalLogs) { entry in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(entry.formattedTime)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 70, alignment: .leading)
+                    Text(entry.level.rawValue)
+                        .font(.system(.caption2, design: .monospaced, weight: .bold))
+                        .foregroundStyle(logColor(entry.level))
+                        .frame(width: 36)
+                    Text(entry.message)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.primary)
+                }
+                .listRowSeparator(.hidden)
+            }
+            .listStyle(.plain)
+            .navigationTitle("Unified Logs")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showLogSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.scrolls)
+    }
+
+    private var exportSheet: some View {
+        NavigationStack {
+            List {
+                Section("Export All Results") {
+                    Button {
+                        UIPasteboard.general.string = vm.exportResults()
+                        showExportSheet = false
+                    } label: {
+                        Label("Copy CSV to Clipboard", systemImage: "doc.on.doc")
+                    }
+                }
+
+                Section("Export by Classification") {
+                    if !vm.successSessions.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = vm.exportByClassification(.validAccount)
+                            showExportSheet = false
+                        } label: {
+                            Label("Success (\(vm.successSessions.count))", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    if !vm.tempLockedSessions.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = vm.exportByClassification(.temporaryLock)
+                            showExportSheet = false
+                        } label: {
+                            Label("Temp Locked (\(vm.tempLockedSessions.count))", systemImage: "clock.badge.exclamationmark")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    if !vm.permBannedSessions.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = vm.exportByClassification(.permanentBan)
+                            showExportSheet = false
+                        } label: {
+                            Label("Perm Banned (\(vm.permBannedSessions.count))", systemImage: "lock.slash.fill")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    if !vm.noAccountSessions.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = vm.exportByClassification(.noAccount)
+                            showExportSheet = false
+                        } label: {
+                            Label("No Account (\(vm.noAccountSessions.count))", systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Export")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showExportSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func logColor(_ level: PPSRLogEntry.Level) -> Color {
+        switch level {
+        case .info: .blue
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        }
+    }
 }
 
-struct DualSessionRow: View {
+struct PairedSessionTile: View {
     let session: DualSiteSession
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
+                classificationIcon
+                    .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
                     Text(session.credential.email)
                         .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text(session.credential.maskedPassword)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
 
@@ -373,9 +676,19 @@ struct DualSessionRow: View {
 
                 VStack(alignment: .trailing, spacing: 4) {
                     classificationBadge
-                    Text(session.formattedDuration)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                    if session.isTerminal {
+                        Text(session.formattedDuration)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    } else if session.currentAttempt > 0 {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text("Attempt \(session.currentAttempt)")
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.cyan)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -383,30 +696,50 @@ struct DualSessionRow: View {
             .padding(.bottom, 8)
 
             HStack(spacing: 8) {
-                siteStatus(
+                siteProgressBar(
                     icon: "suit.spade.fill",
                     name: "JOE",
                     color: .green,
-                    attempts: session.joeAttempts.count,
+                    attempts: session.joeAttempts,
                     maxAttempts: session.maxAttempts
                 )
 
-                siteStatus(
+                siteProgressBar(
                     icon: "flame.fill",
                     name: "IGN",
                     color: .orange,
-                    attempts: session.ignitionAttempts.count,
+                    attempts: session.ignitionAttempts,
                     maxAttempts: session.maxAttempts
                 )
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.bottom, 10)
+
+            if !session.identity.proxyAddress.isEmpty && session.identity.proxyAddress != "direct" {
+                HStack(spacing: 6) {
+                    Image(systemName: "network")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                    Text(session.identity.proxyAddress.prefix(30))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(session.identity.viewport)
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.quaternary)
+                    Text(session.identityAction.rawValue)
+                        .font(.system(size: 7, weight: .heavy, design: .monospaced))
+                        .foregroundStyle(session.identityAction == .burn ? .red : .green)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(.rect(cornerRadius: 12))
     }
 
-    private func siteStatus(icon: String, name: String, color: Color, attempts: Int, maxAttempts: Int) -> some View {
+    private func siteProgressBar(icon: String, name: String, color: Color, attempts: [SiteAttemptResult], maxAttempts: Int) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .bold))
@@ -415,22 +748,52 @@ struct DualSessionRow: View {
                 .font(.system(size: 9, weight: .heavy, design: .monospaced))
                 .foregroundStyle(color)
             Spacer()
-            HStack(spacing: 2) {
+            HStack(spacing: 3) {
                 ForEach(0..<maxAttempts, id: \.self) { i in
-                    Circle()
-                        .fill(i < attempts ? color : color.opacity(0.15))
-                        .frame(width: 6, height: 6)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(i < attempts.count ? color : color.opacity(0.12))
+                        .frame(width: 14, height: 6)
                 }
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
         .background(color.opacity(0.06))
         .clipShape(.rect(cornerRadius: 8))
     }
 
+    private var classificationIcon: some View {
+        let (icon, color, bg) = classificationIconInfo
+        return ZStack {
+            Circle()
+                .fill(bg)
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(color)
+        }
+    }
+
+    private var classificationIconInfo: (String, Color, Color) {
+        switch session.classification {
+        case .validAccount:
+            ("checkmark.circle.fill", .green, .green.opacity(0.15))
+        case .permanentBan:
+            ("lock.slash.fill", .red, .red.opacity(0.15))
+        case .temporaryLock:
+            ("clock.badge.exclamationmark", .orange, .orange.opacity(0.15))
+        case .noAccount:
+            ("xmark.circle.fill", .secondary, Color(.tertiarySystemFill))
+        case .pending:
+            if session.globalState == .active && session.currentAttempt > 0 {
+                ("bolt.fill", .cyan, .cyan.opacity(0.15))
+            } else {
+                ("clock", .secondary, Color(.tertiarySystemFill))
+            }
+        }
+    }
+
     private var classificationBadge: some View {
-        let (text, color) = classificationInfo
+        let (text, color) = classificationBadgeInfo
         return Text(text)
             .font(.system(.caption2, design: .monospaced, weight: .bold))
             .foregroundStyle(color)
@@ -440,17 +803,139 @@ struct DualSessionRow: View {
             .clipShape(Capsule())
     }
 
-    private var classificationInfo: (String, Color) {
+    private var classificationBadgeInfo: (String, Color) {
         switch session.classification {
         case .validAccount: return ("SUCCESS", .green)
         case .permanentBan: return ("PERM BAN", .red)
         case .temporaryLock: return ("TEMP LOCK", .orange)
         case .noAccount: return ("NO ACC", .secondary)
         case .pending:
-            if session.globalState == .active {
-                return ("ACTIVE", .cyan)
+            if session.globalState == .active && session.currentAttempt > 0 {
+                return ("TESTING", .cyan)
             }
-            return ("PENDING", .secondary)
+            return ("QUEUED", .secondary)
+        }
+    }
+}
+
+struct UnifiedSessionDetailSheet: View {
+    let session: DualSiteSession
+    let vm: UnifiedSessionViewModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Credential") {
+                    LabeledContent("Email") {
+                        Text(session.credential.email)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    LabeledContent("Password") {
+                        Text(session.credential.maskedPassword)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    LabeledContent("Classification") {
+                        Text(session.classification.rawValue)
+                            .font(.caption.bold())
+                            .foregroundStyle(classificationColor)
+                    }
+                    LabeledContent("Duration", value: session.formattedDuration)
+                    LabeledContent("Identity Action") {
+                        Text(session.identityAction.rawValue)
+                            .font(.system(.caption, design: .monospaced, weight: .bold))
+                            .foregroundStyle(session.identityAction == .burn ? .red : .green)
+                    }
+                }
+
+                Section("Identity") {
+                    LabeledContent("Proxy") {
+                        Text(session.identity.proxyAddress)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("Viewport") {
+                        Text(session.identity.viewport)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("Canvas") {
+                        Text(session.identity.canvasFingerprint)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Joe Fortune Attempts (\(session.joeAttempts.count)/\(session.maxAttempts))") {
+                    if session.joeAttempts.isEmpty {
+                        Text("No attempts yet").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(session.joeAttempts, id: \.attemptNumber) { attempt in
+                            attemptRow(attempt, color: .green)
+                        }
+                    }
+                }
+
+                Section("Ignition Attempts (\(session.ignitionAttempts.count)/\(session.maxAttempts))") {
+                    if session.ignitionAttempts.isEmpty {
+                        Text("No attempts yet").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(session.ignitionAttempts, id: \.attemptNumber) { attempt in
+                            attemptRow(attempt, color: .orange)
+                        }
+                    }
+                }
+
+                if session.isTerminal {
+                    Section {
+                        Button {
+                            vm.resetSession(session)
+                        } label: {
+                            Label("Reset & Requeue", systemImage: "arrow.counterclockwise")
+                        }
+
+                        Button(role: .destructive) {
+                            vm.removeSession(session)
+                        } label: {
+                            Label("Remove Session", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Session Detail")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.scrolls)
+    }
+
+    private func attemptRow(_ attempt: SiteAttemptResult, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("#\(attempt.attemptNumber)")
+                    .font(.system(.caption, design: .monospaced, weight: .bold))
+                    .foregroundStyle(color)
+                Spacer()
+                Text("\(attempt.durationMs)ms")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            Text(attempt.responseText)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var classificationColor: Color {
+        switch session.classification {
+        case .validAccount: .green
+        case .permanentBan: .red
+        case .temporaryLock: .orange
+        case .noAccount: .secondary
+        case .pending: .cyan
         }
     }
 }

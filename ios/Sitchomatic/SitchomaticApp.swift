@@ -182,6 +182,7 @@ struct SitchomaticApp: App {
                         LoginViewModel.shared.trimAttemptsIfNeeded()
                         PPSRAutomationViewModel.shared.handleMemoryPressure()
                         PPSRAutomationViewModel.shared.trimChecksIfNeeded()
+                        UnifiedSessionViewModel.shared.handleMemoryPressure()
                     }
 
                     let vault = PersistentFileStorageService.shared
@@ -228,12 +229,14 @@ struct SitchomaticApp: App {
                 DebugLogger.shared.persistLatestLog()
                 LoginViewModel.shared.persistCredentialsNow()
                 PPSRAutomationViewModel.shared.persistCardsNow()
+                UnifiedSessionViewModel.shared.persistSessionsNow()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
                 PersistentFileStorageService.shared.forceSave()
                 DebugLogger.shared.persistLatestLog()
                 LoginViewModel.shared.persistCredentialsNow()
                 PPSRAutomationViewModel.shared.persistCardsNow()
+                UnifiedSessionViewModel.shared.persistSessionsNow()
                 BackgroundTaskService.shared.handleAppDidEnterBackground()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
