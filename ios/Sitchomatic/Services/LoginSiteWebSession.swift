@@ -1915,6 +1915,27 @@ class LoginSiteWebSession: NSObject {
             maxTimeoutMs: maxTimeoutMs
         )
     }
+
+    func waitForFullPageReadiness(host: String, sessionId: String, maxTimeoutMs: Int = 30000) async -> PageReadinessService.ReadinessResult {
+        let readiness = PageReadinessService.shared
+        return await readiness.waitForFullPageReadiness(
+            executeJS: { [weak self] js in await self?.executeJS(js) },
+            host: host,
+            sessionId: sessionId,
+            maxTimeoutMs: maxTimeoutMs
+        )
+    }
+
+    func waitForButtonReadyForNextAttempt(originalFingerprint: SmartButtonRecoveryService.ButtonFingerprint?, host: String, sessionId: String, maxTimeoutMs: Int = 25000) async -> PageReadinessService.ButtonReadyResult {
+        let readiness = PageReadinessService.shared
+        return await readiness.waitForButtonReadyForNextAttempt(
+            executeJS: { [weak self] js in await self?.executeJS(js) },
+            originalFingerprint: originalFingerprint,
+            host: host,
+            sessionId: sessionId,
+            maxTimeoutMs: maxTimeoutMs
+        )
+    }
 }
 
 extension LoginSiteWebSession: WKNavigationDelegate {

@@ -624,13 +624,13 @@ class LoginAutomationEngine {
         let _ = await hostFingerprint.captureSignature(from: session, host: pageHost)
 
         await session.injectSettlementMonitor()
-        let settlementResult = await session.waitForSmartSettlement(host: pageHost, sessionId: sessionId, maxTimeoutMs: max(15000, automationSettings.pageLoadExtraDelayMs * 3))
-        if settlementResult.settled {
-            attempt.logs.append(PPSRLogEntry(message: "Smart page settlement: SETTLED in \(settlementResult.durationMs)ms — \(settlementResult.reason)", level: .success))
+        let fullReadiness = await session.waitForFullPageReadiness(host: pageHost, sessionId: sessionId, maxTimeoutMs: max(30000, automationSettings.pageLoadExtraDelayMs * 3))
+        if fullReadiness.ready {
+            attempt.logs.append(PPSRLogEntry(message: "Dynamic readiness: READY in \(fullReadiness.durationMs)ms — \(fullReadiness.reason)", level: .success))
         } else {
-            attempt.logs.append(PPSRLogEntry(message: "Smart page settlement: TIMEOUT after \(settlementResult.durationMs)ms — \(settlementResult.reason) (proceeding anyway)", level: .warning))
+            attempt.logs.append(PPSRLogEntry(message: "Dynamic readiness: TIMEOUT after \(fullReadiness.durationMs)ms — \(fullReadiness.reason) (proceeding with 1s buffer)", level: .warning))
         }
-        logger.log("PageSettlement: \(settlementResult.settled ? "settled" : "timeout") in \(settlementResult.durationMs)ms — net:\(settlementResult.signals.networkIdle) dom:\(settlementResult.signals.domStable) anim:\(settlementResult.signals.animationsComplete) form:\(settlementResult.signals.loginFormReady)", category: .automation, level: settlementResult.settled ? .success : .warning, sessionId: sessionId, durationMs: settlementResult.durationMs)
+        logger.log("PageReadiness: \(fullReadiness.ready ? "ready" : "timeout") in \(fullReadiness.durationMs)ms — js:\(fullReadiness.jsSettled) form:\(fullReadiness.formReady) btn:\(fullReadiness.buttonReady)", category: .automation, level: fullReadiness.ready ? .success : .warning, sessionId: sessionId, durationMs: fullReadiness.durationMs)
 
         let pageTitle = await session.getPageTitle()
         attempt.logs.append(PPSRLogEntry(message: "Page loaded: \"\(pageTitle)\"", level: .info))
@@ -688,7 +688,6 @@ class LoginAutomationEngine {
         let cookieMs = logger.stopTimer(key: "\(sessionId)_cookies")
         attempt.logs.append(PPSRLogEntry(message: "Cookie/consent notices dismissed", level: .info))
         logger.log("Cookie notices dismissed", category: .webView, level: .trace, sessionId: sessionId, durationMs: cookieMs)
-        try? await Task.sleep(for: .milliseconds(300))
 
         let preLoginContent = await session.getPageContent()
         logger.log("Pre-login content captured (\(preLoginContent.count) chars)", category: .webView, level: .trace, sessionId: sessionId)
@@ -700,9 +699,10 @@ class LoginAutomationEngine {
         if verification.found < 2 {
             attempt.logs.append(PPSRLogEntry(message: "Field scan: \(verification.found)/2 found. Missing: [\(verification.missing.joined(separator: ", "))]", level: .warning))
             if verification.found == 0 {
-                attempt.logs.append(PPSRLogEntry(message: "Waiting 4s for JavaScript-rendered content...", level: .info))
-                logger.log("No fields found — waiting 4s for JS render", category: .webView, level: .debug, sessionId: sessionId)
-                try? await Task.sleep(for: .seconds(4))
+                attempt.logs.append(PPSRLogEntry(message: "No fields — waiting for JS to fully settle...", level: .info))
+                logger.log("No fields found — waiting for dynamic JS settlement", category: .webView, level: .debug, sessionId: sessionId)
+                let jsReadiness = await session.waitForFullPageReadiness(host: pageHost, sessionId: sessionId, maxTimeoutMs: 15000)
+                attempt.logs.append(PPSRLogEntry(message: "JS settlement for fields: \(jsReadiness.ready ? "settled" : "timeout") in \(jsReadiness.durationMs)ms", level: jsReadiness.ready ? .info : .warning))
                 let retryVerification = await session.verifyLoginFieldsExist()
                 logger.log("Retry field verification: \(retryVerification.found)/2", category: .automation, level: retryVerification.found > 0 ? .info : .error, sessionId: sessionId)
                 if retryVerification.found == 0 {
@@ -726,9 +726,10 @@ class LoginAutomationEngine {
 
         let interactiveCheck = await checkInteractiveElementsExist(session: session, sessionId: sessionId)
         if !interactiveCheck.hasElements {
-            attempt.logs.append(PPSRLogEntry(message: "NO INTERACTIVE ELEMENTS: page loaded but \(interactiveCheck.detail) — waiting for JS render", level: .warning))
+            attempt.logs.append(PPSRLogEntry(message: "NO INTERACTIVE ELEMENTS: page loaded but \(interactiveCheck.detail) — waiting for JS settlement", level: .warning))
             logger.log("No interactive elements for \(attempt.credential.username): \(interactiveCheck.detail)", category: .automation, level: .error, sessionId: sessionId)
-            try? await Task.sleep(for: .seconds(3))
+            let interactiveReadiness = await session.waitForFullPageReadiness(host: pageHost, sessionId: sessionId, maxTimeoutMs: 15000)
+            attempt.logs.append(PPSRLogEntry(message: "JS settlement for interactive: \(interactiveReadiness.ready ? "settled" : "timeout") in \(interactiveReadiness.durationMs)ms", level: interactiveReadiness.ready ? .info : .warning))
             let retryInteractive = await checkInteractiveElementsExist(session: session, sessionId: sessionId)
             if !retryInteractive.hasElements {
                 failAttempt(attempt, message: "No interactive elements found after extended wait")
@@ -789,8 +790,8 @@ class LoginAutomationEngine {
 
             let selectedPattern: LoginFormPattern
             if cycle == 1 {
-                let colourReadiness = await waitForPageReadyByColour(session: session, sessionId: sessionId)
-                attempt.logs.append(PPSRLogEntry(message: "Colour readiness: settled=\(colourReadiness.settled) in \(colourReadiness.durationMs)ms — \(colourReadiness.detail)", level: colourReadiness.settled ? .success : .warning))
+                let preEntryReadiness = await session.waitForFullPageReadiness(host: pageHost, sessionId: sessionId, maxTimeoutMs: 20000)
+                attempt.logs.append(PPSRLogEntry(message: "Pre-entry readiness: \(preEntryReadiness.ready ? "READY" : "TIMEOUT") in \(preEntryReadiness.durationMs)ms — \(preEntryReadiness.reason)", level: preEntryReadiness.ready ? .success : .warning))
 
                 let learnedBest = humanEngine.selectBestPattern(for: targetURLString)
                 if automationSettings.trueDetectionEnabled && automationSettings.trueDetectionPriority {
@@ -811,50 +812,30 @@ class LoginAutomationEngine {
             attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): selected pattern '\(selectedPattern.rawValue)' — \(selectedPattern.description)", level: .info))
 
             if cycle > 1 {
-                if let savedFingerprint = buttonFingerprint {
-                    let recoveryResult = await session.waitForSmartButtonRecovery(originalFingerprint: savedFingerprint, host: pageHost, sessionId: sessionId)
-                    if recoveryResult.recovered {
-                        attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): button RECOVERED in \(recoveryResult.durationMs)ms — \(recoveryResult.reason)", level: .success))
-                    } else {
-                        attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): button recovery TIMEOUT after \(recoveryResult.durationMs)ms — \(recoveryResult.reason)", level: .warning))
-                        let fallbackCheck = await session.checkLoginButtonReadiness()
-                        if !fallbackCheck.isReady {
-                            let buttonReadyTimeout = TimeoutResolver.resolveAutomationTimeout(15)
-                            let waitResult = await session.waitForLoginButtonReady(timeout: buttonReadyTimeout)
-                            if waitResult.timedOut {
-                                attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): login button hung after smart+legacy check — requeuing", level: .warning))
-                                attempt.status = .failed
-                                attempt.errorMessage = "Login button hung in loading state — requeued"
-                                attempt.completedAt = Date()
-                                await captureDebugScreenshot(session: session, attempt: attempt, step: "button_hung", note: "Login button stuck in translucent/loading state", autoResult: .unknown)
-                                return .unsure
-                            }
-                        }
-                    }
-                    if !recoveryResult.intermediateStates.isEmpty {
-                        logger.log("ButtonRecovery cycle \(cycle): intermediate states: \(recoveryResult.intermediateStates.joined(separator: " → "))", category: .automation, level: .trace, sessionId: sessionId)
-                    }
+                let buttonReadyResult = await session.waitForButtonReadyForNextAttempt(
+                    originalFingerprint: buttonFingerprint,
+                    host: pageHost,
+                    sessionId: sessionId,
+                    maxTimeoutMs: 25000
+                )
+                if buttonReadyResult.ready {
+                    attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): button READY in \(buttonReadyResult.durationMs)ms — \(buttonReadyResult.reason)", level: .success))
                 } else {
-                    let buttonCheck = await session.checkLoginButtonReadiness()
-                    if !buttonCheck.isReady {
-                        let buttonReadyTimeout = TimeoutResolver.resolveAutomationTimeout(15)
-                        attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): login button not ready (\(buttonCheck.detail)) — waiting up to \(Int(buttonReadyTimeout))s", level: .warning))
-                        let waitResult = await session.waitForLoginButtonReady(timeout: buttonReadyTimeout)
-                        if waitResult.timedOut {
-                            attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): login button hung — requeuing", level: .warning))
-                            attempt.status = .failed
-                            attempt.errorMessage = "Login button hung in loading state — requeued"
-                            attempt.completedAt = Date()
-                            await captureDebugScreenshot(session: session, attempt: attempt, step: "button_hung", note: "Login button stuck in translucent/loading state", autoResult: .unknown)
-                            return .unsure
-                        }
+                    attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): button readiness TIMEOUT after \(buttonReadyResult.durationMs)ms — \(buttonReadyResult.reason)", level: .warning))
+                    let fallbackCheck = await session.checkLoginButtonReadiness()
+                    if !fallbackCheck.isReady {
+                        attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): login button hung after dynamic readiness check — requeuing", level: .warning))
+                        attempt.status = .failed
+                        attempt.errorMessage = "Login button hung in loading state — requeued"
+                        attempt.completedAt = Date()
+                        await captureDebugScreenshot(session: session, attempt: attempt, step: "button_hung", note: "Login button stuck in translucent/loading state", autoResult: .unknown)
+                        return .unsure
                     }
-                    try? await Task.sleep(for: .milliseconds(Int.random(in: 500...1500)))
                 }
+                logger.log("Cycle \(cycle) button readiness: \(buttonReadyResult.ready ? "ready" : "timeout") in \(buttonReadyResult.durationMs)ms fp:\(buttonReadyResult.recoveredFromFingerprint)", category: .automation, level: buttonReadyResult.ready ? .success : .warning, sessionId: sessionId, durationMs: buttonReadyResult.durationMs)
             }
 
             await session.dismissCookieNotices()
-            try? await Task.sleep(for: .milliseconds(Int.random(in: 200...600)))
 
             logger.startTimer(key: "\(sessionId)_pattern_\(cycle)")
             let patternResult = await session.executeHumanPattern(
@@ -932,7 +913,13 @@ class LoginAutomationEngine {
                             break
                         }
                         if submitAttempt < 4 {
-                            try? await Task.sleep(for: .seconds(Double(submitAttempt)))
+                            let retryReady = await session.waitForButtonReadyForNextAttempt(
+                                originalFingerprint: buttonFingerprint,
+                                host: pageHost,
+                                sessionId: sessionId,
+                                maxTimeoutMs: 15000
+                            )
+                            attempt.logs.append(PPSRLogEntry(message: "Legacy click retry \(submitAttempt): button \(retryReady.ready ? "ready" : "timeout") in \(retryReady.durationMs)ms", level: retryReady.ready ? .info : .warning))
                         }
                     }
                 }
@@ -1149,7 +1136,6 @@ class LoginAutomationEngine {
                 if cycle < maxSubmitCycles {
                     attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): no account — retrying (\(maxSubmitCycles - cycle) cycles left)", level: .warning))
                     finalOutcome = .noAcc
-                    try? await Task.sleep(for: .seconds(Double(cycle) * 1.5))
                 } else {
                     finalOutcome = .noAcc
                 }
@@ -1157,7 +1143,6 @@ class LoginAutomationEngine {
             default:
                 if cycle < maxSubmitCycles {
                     attempt.logs.append(PPSRLogEntry(message: "Cycle \(cycle): no clear result — retrying (\(maxSubmitCycles - cycle) cycles left)", level: .warning))
-                    try? await Task.sleep(for: .seconds(Double(cycle) * 1.5))
                 }
                 finalOutcome = .noAcc
             }
