@@ -67,11 +67,14 @@ struct UnifiedSessionFeedView: View {
                         statusHeader
 
                         if vm.isRunning {
+                            AdaptiveConcurrencyDashboardView(engine: vm.adaptiveEngine)
                             batchProgressCard
                             batchControls
                         }
 
-                        concurrencyControl
+                        if !vm.isRunning {
+                            concurrencyCapControl
+                        }
 
                         if vm.sessions.isEmpty {
                             emptyState
@@ -282,7 +285,7 @@ struct UnifiedSessionFeedView: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    Text("\(vm.activeWorkerCount) workers · \(vm.queuedSessions.count) queued · \(vm.completedSessions.count) done")
+                    Text("\(vm.adaptiveEngine.liveConcurrency)/\(vm.adaptiveEngine.maxCap) AI · \(vm.queuedSessions.count) queued · \(vm.completedSessions.count) done")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -363,87 +366,27 @@ struct UnifiedSessionFeedView: View {
         }
     }
 
-    private var concurrencyControl: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.caption.bold())
-                    .foregroundStyle(.cyan)
-                Text("CONCURRENT WORKERS")
-                    .font(.system(.caption, design: .monospaced, weight: .heavy))
-                    .foregroundStyle(.cyan)
-                Spacer()
-                Text("\(vm.maxConcurrency)")
-                    .font(.system(.caption2, design: .monospaced, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.cyan.opacity(0.12))
-                    .clipShape(Capsule())
+    private var concurrencyCapControl: some View {
+        VStack(spacing: 10) {
+            ConcurrencyCapSelector(engine: vm.adaptiveEngine, isRunning: vm.isRunning)
+
+            Button { vm.startBatch() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill")
+                    Text("START LOGIN TEST")
+                        .font(.system(.caption, design: .monospaced, weight: .heavy))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    LinearGradient(colors: [.green, .orange], startPoint: .leading, endPoint: .trailing)
+                )
+                .foregroundStyle(.black)
+                .clipShape(.rect(cornerRadius: 10))
             }
-
-            HStack(spacing: 6) {
-                Button {
-                    withAnimation(.spring(duration: 0.25)) { vm.maxConcurrency = max(1, vm.maxConcurrency - 1) }
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.caption.bold())
-                        .frame(width: 32, height: 32)
-                        .background(Color(.tertiarySystemFill))
-                        .foregroundStyle(.primary)
-                        .clipShape(.rect(cornerRadius: 8))
-                }
-                .disabled(vm.maxConcurrency <= 1 || vm.isRunning)
-
-                GeometryReader { geo in
-                    let filledWidth = geo.size.width * CGFloat(vm.maxConcurrency) / 8.0
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(.quaternarySystemFill))
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(LinearGradient(colors: [.green, .orange], startPoint: .leading, endPoint: .trailing))
-                            .frame(width: filledWidth)
-                            .animation(.spring(duration: 0.3), value: vm.maxConcurrency)
-                    }
-                }
-                .frame(height: 32)
-
-                Button {
-                    withAnimation(.spring(duration: 0.25)) { vm.maxConcurrency = min(8, vm.maxConcurrency + 1) }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.caption.bold())
-                        .frame(width: 32, height: 32)
-                        .background(Color(.tertiarySystemFill))
-                        .foregroundStyle(.primary)
-                        .clipShape(.rect(cornerRadius: 8))
-                }
-                .disabled(vm.maxConcurrency >= 8 || vm.isRunning)
-            }
-
-            if !vm.isRunning {
-                Button { vm.startBatch() } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                        Text("START LOGIN TEST")
-                            .font(.system(.caption, design: .monospaced, weight: .heavy))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        LinearGradient(colors: [.green, .orange], startPoint: .leading, endPoint: .trailing)
-                    )
-                    .foregroundStyle(.black)
-                    .clipShape(.rect(cornerRadius: 10))
-                }
-                .disabled(vm.pendingSessions.isEmpty)
-                .sensoryFeedback(.impact(weight: .heavy), trigger: vm.isRunning)
-            }
+            .disabled(vm.pendingSessions.isEmpty)
+            .sensoryFeedback(.impact(weight: .heavy), trigger: vm.isRunning)
         }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(.rect(cornerRadius: 14))
-        .sensoryFeedback(.impact(weight: .medium), trigger: vm.maxConcurrency)
     }
 
     private var statsRow: some View {
@@ -477,7 +420,7 @@ struct UnifiedSessionFeedView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text("V4.1 — \(vm.maxConcurrency) workers · 4 attempts · Early-stop sync")
+            Text("V4.1 — AI adaptive · 4 attempts · Early-stop sync")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.tertiary)
 

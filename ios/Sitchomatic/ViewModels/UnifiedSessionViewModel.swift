@@ -11,7 +11,7 @@ class UnifiedSessionViewModel {
     var isRunning: Bool = false
     var isPaused: Bool = false
     var isStopping: Bool = false
-    var maxConcurrency: Int = 4
+    let adaptiveEngine = AdaptiveConcurrencyEngine.shared
     var config: UnifiedSystemConfig = .defaultConfig
     var stealthEnabled: Bool = true
     var globalLogs: [PPSRLogEntry] = []
@@ -153,8 +153,10 @@ class UnifiedSessionViewModel {
         batchStartTime = Date()
         backgroundService.beginExtendedBackgroundExecution(reason: "Unified dual-site batch test")
 
-        log("Starting unified batch: \(toTest.count) sessions, \(maxConcurrency) workers, stealth: \(stealthEnabled ? "ON" : "OFF")", level: .info)
-        logger.log("UNIFIED BATCH START: \(toTest.count) sessions, concurrency=\(maxConcurrency)", category: .login, level: .info)
+        adaptiveEngine.start(cap: adaptiveEngine.maxCap)
+
+        log("Starting unified batch: \(toTest.count) sessions, AI adaptive (cap \(adaptiveEngine.maxCap)), stealth: \(stealthEnabled ? "ON" : "OFF")", level: .info)
+        logger.log("UNIFIED BATCH START: \(toTest.count) sessions, adaptive cap=\(adaptiveEngine.maxCap)", category: .login, level: .info)
 
         batchTask = Task {
             await withTaskGroup(of: Void.self) { group in
@@ -180,7 +182,8 @@ class UnifiedSessionViewModel {
                     }
                     guard !self.isStopping && !Task.isCancelled else { break }
 
-                    if running >= self.maxConcurrency {
+                    let currentLiveConcurrency = self.adaptiveEngine.liveConcurrency
+                    if running >= currentLiveConcurrency {
                         await group.next()
                         running -= 1
                     }
@@ -194,6 +197,7 @@ class UnifiedSessionViewModel {
 
                     group.addTask { @MainActor in
                         var session = sessionSnapshot
+                        let startTime = Date()
                         let result = await self.worker.runDualSiteSession(
                             session: &session,
                             config: workerConfig,
@@ -211,6 +215,17 @@ class UnifiedSessionViewModel {
                         if let i = self.sessions.firstIndex(where: { $0.id == result.session.id }) {
                             self.sessions[i] = result.session
                         }
+
+                        let latencyMs = Int(Date().timeIntervalSince(startTime) * 1000)
+                        let isConclusive = result.session.isTerminal
+                        let isTimeout = !isConclusive && result.session.globalState == .active
+                        self.adaptiveEngine.recordOutcome(
+                            conclusive: isConclusive,
+                            timeout: isTimeout,
+                            connectionFailure: false,
+                            latencyMs: latencyMs
+                        )
+
                         self.persistSessions()
                         running = max(0, running - 1)
                     }
@@ -302,6 +317,7 @@ class UnifiedSessionViewModel {
         pauseCountdown = 0
         batchStartTime = nil
 
+        adaptiveEngine.stop()
         backgroundService.endExtendedBackgroundExecution()
 
         log("Unified batch complete: \(success) success, \(perm) perm banned, \(temp) temp locked, \(noAcc) no account", level: .success)
