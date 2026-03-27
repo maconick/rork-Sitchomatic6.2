@@ -889,6 +889,39 @@ struct UnifiedSessionDetailSheet: View {
                             .font(.system(.caption, design: .monospaced, weight: .bold))
                             .foregroundStyle(session.highestPriorityResult.color)
                     }
+                    if let ocrStatus = session.pairedOCRStatus {
+                        LabeledContent("OCR Evaluation") {
+                            Text(ocrStatus)
+                                .font(.system(.caption, design: .monospaced, weight: .bold))
+                                .foregroundStyle(.cyan)
+                        }
+                    }
+                    if let joeOCR = session.joeOCRMetadata {
+                        LabeledContent("Joe OCR") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(joeOCR.ocrOutcome)
+                                    .font(.system(.caption, design: .monospaced, weight: .bold))
+                                if !joeOCR.crucialMatches.isEmpty {
+                                    Text(joeOCR.crucialMatches.joined(separator: ", "))
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let ignOCR = session.ignitionOCRMetadata {
+                        LabeledContent("Ign OCR") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(ignOCR.ocrOutcome)
+                                    .font(.system(.caption, design: .monospaced, weight: .bold))
+                                if !ignOCR.crucialMatches.isEmpty {
+                                    Text(ignOCR.crucialMatches.joined(separator: ", "))
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
                     LabeledContent("Duration", value: session.formattedDuration)
                     LabeledContent("Identity Action") {
                         Text(session.identityAction.rawValue)

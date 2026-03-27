@@ -105,13 +105,15 @@ class ConfidenceResultEngine {
             confidence = min(1.0, successScore / 0.8)
             reasoning = "SUCCESS — composite success score \(String(format: "%.2f", successScore))"
         } else if incorrectScore >= incorrectThreshold && incorrectScore > successScore {
+            // Note: noAcc here is provisional — callers must enforce the 4-attempt
+            // minimum before treating this as a confirmed No Account result.
             outcome = .noAcc
             confidence = min(1.0, incorrectScore / 0.6)
-            reasoning = "NO ACC — composite incorrect score \(String(format: "%.2f", incorrectScore))"
+            reasoning = "NO ACC (provisional) — composite incorrect score \(String(format: "%.2f", incorrectScore)), requires 4 complete cycles for confirmation"
         } else {
-            outcome = .noAcc
+            outcome = .unsure
             confidence = 0.3
-            reasoning = "AMBIGUOUS — defaulting to noAcc (success:\(String(format: "%.2f", successScore)) incorrect:\(String(format: "%.2f", incorrectScore)) disabled:\(String(format: "%.2f", disabledScore)))"
+            reasoning = "AMBIGUOUS — unsure (success:\(String(format: "%.2f", successScore)) incorrect:\(String(format: "%.2f", incorrectScore)) disabled:\(String(format: "%.2f", disabledScore)))"
         }
 
         if aiAnalyzer.shouldUseAIFallback(confidence: confidence) {
@@ -205,12 +207,13 @@ class ConfidenceResultEngine {
 
     private func evaluatePageText(pageContent: String) -> SignalContribution {
         let content = pageContent.lowercased()
-        let weight = 0.30
+        let weight = 0.20  // Reduced: OCR is primary signal per Blueprint
 
-        let successMarkers = ["balance", "wallet", "my account", "logout", "dashboard"]
-        let incorrectMarkers = ["incorrect password", "invalid credentials", "wrong password", "invalid email or password", "login failed", "authentication failed", "no account found", "account not found"]
+        // 100/100 Strict Triggers take absolute priority
         let disabledMarkers = ["has been disabled"]
         let tempMarkers = ["temporarily disabled"]
+        let successMarkers = ["balance", "wallet", "my account", "logout", "dashboard"]
+        let incorrectMarkers = ["incorrect password", "invalid credentials", "wrong password", "invalid email or password", "login failed", "authentication failed", "no account found", "account not found", "incorrect", "not find", "no account", "invalid"]
 
         for marker in successMarkers {
             if content.contains(marker) {
@@ -240,7 +243,7 @@ class ConfidenceResultEngine {
     }
 
     private func evaluateURLChange(currentURL: String, preLoginURL: String) -> SignalContribution {
-        let weight = 0.25
+        let weight = 0.15  // Reduced: OCR is primary signal per Blueprint
         let currentLower = currentURL.lowercased()
         let preLower = preLoginURL.lowercased()
 
@@ -254,7 +257,7 @@ class ConfidenceResultEngine {
     }
 
     private func evaluateDOMMarkers(welcomeTextFound: Bool, redirectedToHomepage: Bool, navigationDetected: Bool, contentChanged: Bool) -> SignalContribution {
-        let weight = 0.20
+        let weight = 0.15  // Reduced: OCR is primary signal per Blueprint
         var raw = 0.0
 
         if redirectedToHomepage { raw += 0.5 }
@@ -283,14 +286,16 @@ class ConfidenceResultEngine {
     }
 
     private func evaluateScreenshotOCR(screenshot: UIImage) async -> SignalContribution {
-        let weight = 0.15
+        // OCR is the PRIMARY signal in the 100/100 weight Apple Vision Blueprint.
+        let weight = 0.40
         guard let cgImage = screenshot.cgImage else {
             return SignalContribution(source: "OCR_FAIL", weight: weight, rawScore: 0.0, weightedScore: 0.0, detail: "no cgImage")
         }
 
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .fast
+        request.recognitionLevel = .accurate  // Blueprint uses VNRequestTextRecognitionLevelAccurate
         request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = true
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         do {
             try handler.perform([request])
@@ -304,31 +309,35 @@ class ConfidenceResultEngine {
 
         let allText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ").lowercased()
 
-        let successOCR = ["balance", "wallet", "my account", "logout"]
+        // 100/100 Strict Triggers (absolute priority — immediate return)
+        if allText.contains("has been disabled") {
+            return SignalContribution(source: "DISABLED_OCR", weight: weight, rawScore: 1.0, weightedScore: weight, detail: "disabled STRICT: 'has been disabled' — Perm Disabled")
+        }
+        if allText.contains("temporarily disabled") {
+            return SignalContribution(source: "TEMP_OCR", weight: weight, rawScore: 1.0, weightedScore: weight, detail: "temporarily disabled STRICT: 'temporarily disabled' — Temp Disabled")
+        }
+
+        // Secondary Logic — Success
+        let successOCR = ["my account", "balance", "deposit", "welcome", "logout"]
         for term in successOCR {
             if allText.contains(term) {
                 return SignalContribution(source: "SUCCESS_OCR", weight: weight, rawScore: 0.9, weightedScore: weight * 0.9, detail: "success OCR '\(term)'")
             }
         }
 
+        // Secondary Logic — No Account
+        let noAccOCR = ["incorrect", "not find", "no account", "invalid"]
+        for term in noAccOCR {
+            if allText.contains(term) {
+                return SignalContribution(source: "NOACC_OCR", weight: weight, rawScore: 0.85, weightedScore: weight * 0.85, detail: "no acc OCR '\(term)'")
+            }
+        }
+
+        // SMS Detection
         let smsOCR = ["sms", "text message", "verification code", "verify your phone", "send code", "enter code", "phone verification"]
         for term in smsOCR {
             if allText.contains(term) {
                 return SignalContribution(source: "SMS_OCR", weight: weight, rawScore: 0.85, weightedScore: weight * 0.85, detail: "sms notification OCR '\(term)'")
-            }
-        }
-
-        let disabledOCR = ["disabled", "suspended", "banned", "blocked", "closed"]
-        for term in disabledOCR {
-            if allText.contains(term) {
-                return SignalContribution(source: "DISABLED_OCR", weight: weight, rawScore: 0.8, weightedScore: weight * 0.8, detail: "disabled OCR '\(term)'")
-            }
-        }
-
-        let incorrectOCR = ["incorrect", "invalid", "wrong", "failed", "error"]
-        for term in incorrectOCR {
-            if allText.contains(term) {
-                return SignalContribution(source: "INCORRECT_OCR", weight: weight, rawScore: 0.6, weightedScore: weight * 0.6, detail: "incorrect OCR '\(term)'")
             }
         }
 

@@ -13,11 +13,13 @@ class DualSiteWorkerService {
     private let urlRotation = LoginURLRotationService.shared
     private let crashProtection = CrashProtectionService.shared
     private let screenshotManager = UnifiedScreenshotManager.shared
+    private let visionOCR = VisionTextCropService.shared
 
     struct WorkerResult {
         let session: DualSiteSession
         let joeOutcome: LoginOutcome?
         let ignitionOutcome: LoginOutcome?
+        let pairedOCRStatus: String?
     }
 
     func runDualSiteSession(
@@ -154,7 +156,7 @@ class DualSiteWorkerService {
                 session.endTime = Date()
                 onLog("Worker \(sessionId): SUCCESS — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .success)
                 notifications.sendBatchComplete(working: 1, dead: 0, requeued: 0)
-                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .successDetected)
+                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .successDetected, session: &session)
 
             case .permBan:
                 session.globalState = .abortPerm
@@ -163,7 +165,7 @@ class DualSiteWorkerService {
                 session.endTime = Date()
                 onLog("Worker \(sessionId): PERM BAN — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .error)
                 blacklistService.addToBlacklist(session.credential.email, reason: "Auto: perm disabled via unified test")
-                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .terminalState)
+                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .terminalState, session: &session)
 
             case .tempLock:
                 session.globalState = .abortTemp
@@ -171,7 +173,7 @@ class DualSiteWorkerService {
                 session.identityAction = .save
                 session.endTime = Date()
                 onLog("Worker \(sessionId): TEMP LOCK — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .warning)
-                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .terminalState)
+                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .terminalState, session: &session)
 
             case .continueLoop:
                 onLog("Worker \(sessionId): incorrect on attempt \(attemptNum) — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .info)
@@ -187,7 +189,7 @@ class DualSiteWorkerService {
                 session.joeSiteResult = joeFinal
                 session.ignitionSiteResult = ignFinal
                 onLog("Worker \(sessionId): EXHAUSTED — \(joeFinal.shortLabel) | \(ignFinal.shortLabel)", .error)
-                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .finalState)
+                await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .finalState, session: &session)
 
             case .uncertain:
                 if attemptNum >= config.maxAttemptsPerSite {
@@ -198,7 +200,7 @@ class DualSiteWorkerService {
                     session.joeSiteResult = SiteResult.fromLoginOutcome(joeOutcome, registeredAttempts: joeRegistered, maxAttempts: config.maxAttemptsPerSite)
                     session.ignitionSiteResult = SiteResult.fromLoginOutcome(ignOutcome, registeredAttempts: ignRegistered, maxAttempts: config.maxAttemptsPerSite)
                     onLog("Worker \(sessionId): UNCERTAIN max — \(session.joeSiteResult.shortLabel) | \(session.ignitionSiteResult.shortLabel)", .warning)
-                    await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .finalState)
+                    await captureTerminalScreenshots(joeEngine: joeEngine, ignEngine: ignEngine, joeAttempt: joeAttempt, ignAttempt: ignAttempt, sessionId: workerSessionId, email: credEmail, attemptNum: attemptNum, step: .finalState, session: &session)
                 } else {
                     onLog("Worker \(sessionId): uncertain attempt \(attemptNum) — retrying", .warning)
                 }
@@ -223,7 +225,7 @@ class DualSiteWorkerService {
             onUpdate(session)
         }
 
-        return WorkerResult(session: session, joeOutcome: lastJoeOutcome, ignitionOutcome: lastIgnOutcome)
+        return WorkerResult(session: session, joeOutcome: lastJoeOutcome, ignitionOutcome: lastIgnOutcome, pairedOCRStatus: session.pairedOCRStatus)
     }
 
     private func runParallelAttempts(
@@ -342,8 +344,11 @@ class DualSiteWorkerService {
         sessionId: String,
         email: String,
         attemptNum: Int,
-        step: ScreenshotStep
+        step: ScreenshotStep,
+        session: inout DualSiteSession
     ) async {
+        let pairTimestamp = Date()
+
         if let joeImg = joeAttempt.responseSnapshot {
             await screenshotManager.addScreenshot(
                 image: joeImg,
@@ -353,6 +358,16 @@ class DualSiteWorkerService {
                 step: step,
                 attemptNumber: attemptNum,
                 runVisionAnalysis: true
+            )
+            // Run Apple Vision OCR per Blueprint
+            let analysis = await visionOCR.analyzeScreenshot(joeImg)
+            session.joeOCRMetadata = SiteOCRMetadata(
+                siteId: "joe",
+                ocrOutcome: analysis.detectedOutcome.pairedLabel,
+                crucialMatches: analysis.crucialMatches,
+                fullText: String(analysis.allText.prefix(2000)),
+                confidence: analysis.confidence,
+                screenshotTimestamp: pairTimestamp
             )
         }
         if let ignImg = ignAttempt.responseSnapshot {
@@ -365,6 +380,24 @@ class DualSiteWorkerService {
                 attemptNumber: attemptNum,
                 runVisionAnalysis: true
             )
+            // Run Apple Vision OCR per Blueprint
+            let analysis = await visionOCR.analyzeScreenshot(ignImg)
+            session.ignitionOCRMetadata = SiteOCRMetadata(
+                siteId: "ignition",
+                ocrOutcome: analysis.detectedOutcome.pairedLabel,
+                crucialMatches: analysis.crucialMatches,
+                fullText: String(analysis.allText.prefix(2000)),
+                confidence: analysis.confidence,
+                screenshotTimestamp: pairTimestamp
+            )
+        }
+
+        if let joeOCR = session.joeOCRMetadata, let ignOCR = session.ignitionOCRMetadata {
+            let paired = VisionTextCropService.pairedOCRStatus(
+                joe: ocrLabelToOutcome(joeOCR.ocrOutcome),
+                ignition: ocrLabelToOutcome(ignOCR.ocrOutcome)
+            )
+            logger.log("OCR Paired Evaluation: \(email) → \(paired)", category: .evaluation, level: .info)
         }
     }
 
@@ -432,6 +465,20 @@ class DualSiteWorkerService {
         case .continueLoop: .postAttempt
         case .exhausted: .finalState
         case .uncertain: .responseDetected
+        }
+    }
+
+    /// Maps a paired OCR label string back to a VisionTextCropService.DetectedOutcome
+    /// for use with the pairedOCRStatus helper.
+    private func ocrLabelToOutcome(_ label: String) -> VisionTextCropService.DetectedOutcome {
+        switch label {
+        case "Perm Disabled": return .permDisabled
+        case "Temp Disabled": return .tempDisabled
+        case "Success": return .success
+        case "No Acc": return .noAccount
+        case "SMS Detected": return .smsVerification
+        case "Error": return .errorBanner
+        default: return .unknown
         }
     }
 }

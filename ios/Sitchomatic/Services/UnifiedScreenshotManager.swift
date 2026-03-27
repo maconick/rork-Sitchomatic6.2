@@ -166,7 +166,7 @@ class UnifiedScreenshot: Identifiable {
     var outcomeColor: SwiftUI.Color {
         switch detectedOutcome {
         case .success: .green
-        case .incorrectPassword: .secondary
+        case .incorrectPassword, .noAccount: .secondary
         case .permDisabled: .red
         case .tempDisabled: .orange
         case .smsVerification: .purple
@@ -179,6 +179,7 @@ class UnifiedScreenshot: Identifiable {
         switch detectedOutcome {
         case .success: "SUCCESS"
         case .incorrectPassword: "INCORRECT"
+        case .noAccount: "NO ACC"
         case .permDisabled: "PERM DISABLED"
         case .tempDisabled: "TEMP DISABLED"
         case .smsVerification: "SMS"
