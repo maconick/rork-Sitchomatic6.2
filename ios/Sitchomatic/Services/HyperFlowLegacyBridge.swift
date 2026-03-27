@@ -1656,6 +1656,64 @@ class LoginWebSession: NSObject {
         guard let cropped = cgImage.cropping(to: scaledRect) else { return nil }
         return UIImage(cgImage: cropped, scale: scale, orientation: image.imageOrientation)
     }
+
+    // MARK: Additional PPSR Methods
+
+    func checkForIframes() async -> Bool {
+        guard let wv = webView else { return false }
+        let js = "(function(){ return document.querySelectorAll('iframe').length > 0 ? 'true' : 'false'; })()"
+        do {
+            let result = try await wv.evaluateJavaScript(js) as? String
+            return result == "true"
+        } catch { return false }
+    }
+
+    func dumpPageStructure() async -> String? {
+        guard let wv = webView else { return nil }
+        let js = """
+        (function(){
+            function walk(el, depth) {
+                if (depth > 4) return '';
+                var tag = el.tagName || '';
+                var id = el.id ? '#' + el.id : '';
+                var cls = el.className && typeof el.className === 'string' ? '.' + el.className.split(' ').join('.') : '';
+                var prefix = '  '.repeat(depth);
+                var line = prefix + tag.toLowerCase() + id + cls + '\\n';
+                for (var i = 0; i < el.children.length && i < 20; i++) {
+                    line += walk(el.children[i], depth + 1);
+                }
+                return line;
+            }
+            return walk(document.body || document.documentElement, 0).substring(0, 5000);
+        })()
+        """
+        do {
+            return try await wv.evaluateJavaScript(js) as? String
+        } catch { return nil }
+    }
+
+    func verifyFieldsExist() async -> Bool {
+        guard let wv = webView else { return false }
+        let js = """
+        (function(){
+            var vin = document.querySelector('input[name*="vin" i], input[id*="vin" i], input[placeholder*="vin" i], input[aria-label*="vin" i]');
+            return vin ? 'true' : 'false';
+        })()
+        """
+        do {
+            let result = try await wv.evaluateJavaScript(js) as? String
+            return result == "true"
+        } catch { return false }
+    }
+
+    func waitForNavigation(timeout: TimeInterval = 30) async -> Bool {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if isPageLoaded { return true }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return isPageLoaded
+    }
 }
 
 // MARK: - LoginWebSession + WKNavigationDelegate
@@ -2347,6 +2405,27 @@ class BPointWebSession: NSObject {
                                 width: rect.width * scale, height: rect.height * scale)
         guard let cropped = cgImage.cropping(to: scaledRect) else { return nil }
         return UIImage(cgImage: cropped, scale: scale, orientation: image.imageOrientation)
+    }
+
+    func detectEmailFieldOnPaymentPage() async -> Bool {
+        guard let wv = webView else { return false }
+        let js = "(function(){ var el = document.querySelector('input[type=\"email\"], input[name*=\"email\" i], input[id*=\"email\" i]'); return el ? 'true' : 'false'; })()"
+        do {
+            let result = try await wv.evaluateJavaScript(js) as? String
+            return result == "true"
+        } catch { return false }
+    }
+
+    func waitForContentChange(timeout: TimeInterval = 10) async -> Bool {
+        guard let wv = webView else { return false }
+        let initialContent = try? await wv.evaluateJavaScript("document.body.innerText.length") as? Int
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            try? await Task.sleep(for: .milliseconds(500))
+            let currentContent = try? await wv.evaluateJavaScript("document.body.innerText.length") as? Int
+            if currentContent != initialContent { return true }
+        }
+        return false
     }
 }
 

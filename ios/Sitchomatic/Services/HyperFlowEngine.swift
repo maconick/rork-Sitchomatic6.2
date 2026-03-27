@@ -373,7 +373,7 @@ public final class HeadlessWebViewWorker: NSObject, WKNavigationDelegate, WKScri
         }
 
         // Domain filtering: only allow navigation to explicitly allowed domains
-        let domainAllowed = allowedDomains.isEmpty || allowedDomains.contains(where: { host.hasSuffix($0) })
+        let domainAllowed = allowedDomains.isEmpty || allowedDomains.contains(where: { host == $0 || host.hasSuffix("." + $0) })
         decisionHandler(domainAllowed ? .allow : .cancel)
     }
 
