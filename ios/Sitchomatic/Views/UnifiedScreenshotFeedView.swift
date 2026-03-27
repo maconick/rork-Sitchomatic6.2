@@ -51,7 +51,7 @@ struct UnifiedScreenshotFeedView: View {
         case .success: manager.screenshots.filter { $0.detectedOutcome == .success }
         case .permDisabled: manager.screenshots.filter { $0.detectedOutcome == .permDisabled }
         case .tempDisabled: manager.screenshots.filter { $0.detectedOutcome == .tempDisabled }
-        case .incorrect: manager.screenshots.filter { $0.detectedOutcome == .incorrectPassword }
+        case .incorrect: manager.screenshots.filter { $0.detectedOutcome == .incorrectPassword || $0.detectedOutcome == .noAccount }
         case .unknown: manager.screenshots.filter { $0.detectedOutcome == .unknown }
         }
     }
@@ -63,7 +63,7 @@ struct UnifiedScreenshotFeedView: View {
         case .success: manager.screenshots.filter { $0.detectedOutcome == .success }.count
         case .permDisabled: manager.screenshots.filter { $0.detectedOutcome == .permDisabled }.count
         case .tempDisabled: manager.screenshots.filter { $0.detectedOutcome == .tempDisabled }.count
-        case .incorrect: manager.screenshots.filter { $0.detectedOutcome == .incorrectPassword }.count
+        case .incorrect: manager.screenshots.filter { $0.detectedOutcome == .incorrectPassword || $0.detectedOutcome == .noAccount }.count
         case .unknown: manager.screenshots.filter { $0.detectedOutcome == .unknown }.count
         }
     }

@@ -691,11 +691,12 @@ class LoginAutomationEngine {
 
         let priorityPatterns: [LoginFormPattern]
         if automationSettings.trueDetectionEnabled && automationSettings.trueDetectionPriority {
-            priorityPatterns = [.trueDetection, .calibratedTyping, .calibratedDirect, .tabNavigation, .reactNativeSetter, .formSubmitDirect, .coordinateClick, .visionMLCoordinate, .clickFocusSequential, .execCommandInsert, .slowDeliberateTyper, .mobileTouchBurst]
+            // OCR Vision ML coordinate click is the primary method for undetectable automation
+            priorityPatterns = [.visionMLCoordinate, .trueDetection, .calibratedTyping, .calibratedDirect, .tabNavigation, .reactNativeSetter, .formSubmitDirect, .coordinateClick, .clickFocusSequential, .execCommandInsert, .slowDeliberateTyper, .mobileTouchBurst]
         } else if calibration?.isCalibrated == true {
-            priorityPatterns = [.calibratedTyping, .calibratedDirect, .trueDetection, .tabNavigation, .reactNativeSetter, .formSubmitDirect, .coordinateClick, .visionMLCoordinate, .clickFocusSequential, .execCommandInsert, .slowDeliberateTyper, .mobileTouchBurst]
+            priorityPatterns = [.visionMLCoordinate, .calibratedTyping, .calibratedDirect, .trueDetection, .tabNavigation, .reactNativeSetter, .formSubmitDirect, .coordinateClick, .clickFocusSequential, .execCommandInsert, .slowDeliberateTyper, .mobileTouchBurst]
         } else {
-            priorityPatterns = [.trueDetection, .tabNavigation, .reactNativeSetter, .visionMLCoordinate, .formSubmitDirect, .clickFocusSequential, .execCommandInsert, .slowDeliberateTyper, .mobileTouchBurst, .calibratedDirect, .coordinateClick, .calibratedTyping]
+            priorityPatterns = [.visionMLCoordinate, .trueDetection, .tabNavigation, .reactNativeSetter, .formSubmitDirect, .clickFocusSequential, .execCommandInsert, .slowDeliberateTyper, .mobileTouchBurst, .calibratedDirect, .coordinateClick, .calibratedTyping]
         }
 
         for cycle in 1...maxSubmitCycles {
@@ -708,13 +709,16 @@ class LoginAutomationEngine {
                 attempt.logs.append(PPSRLogEntry(message: "Pre-entry readiness: \(preEntryReadiness.ready ? "READY" : "TIMEOUT") in \(preEntryReadiness.durationMs)ms — \(preEntryReadiness.reason)", level: preEntryReadiness.ready ? .success : .warning))
 
                 let learnedBest = humanEngine.selectBestPattern(for: targetURLString)
-                if automationSettings.trueDetectionEnabled && automationSettings.trueDetectionPriority {
-                    selectedPattern = .trueDetection
-                } else if learnedBest != .trueDetection {
-                    selectedPattern = learnedBest
-                    attempt.logs.append(PPSRLogEntry(message: "PatternML selected '\(learnedBest.rawValue)' as historically best for this site", level: .info))
+                if learnedBest == .visionMLCoordinate {
+                    // OCR-based coordinate click is already the best learned pattern
+                    selectedPattern = .visionMLCoordinate
+                    attempt.logs.append(PPSRLogEntry(message: "PatternML confirmed visionMLCoordinate as best for this site", level: .info))
+                } else if learnedBest != .trueDetection && learnedBest != .visionMLCoordinate {
+                    // A non-default pattern won via learning — still try visionML first
+                    selectedPattern = .visionMLCoordinate
+                    attempt.logs.append(PPSRLogEntry(message: "OCR Vision first: overriding learned '\(learnedBest.rawValue)' — visionMLCoordinate is primary for undetectable automation", level: .info))
                 } else {
-                    selectedPattern = .trueDetection
+                    selectedPattern = .visionMLCoordinate
                 }
             } else {
                 let remaining = priorityPatterns.filter { !usedPatterns.contains($0) }

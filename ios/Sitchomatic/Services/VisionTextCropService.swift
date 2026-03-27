@@ -36,39 +36,68 @@ class VisionTextCropService {
     nonisolated enum DetectedOutcome: String, Sendable {
         case success
         case incorrectPassword
+        case noAccount
         case permDisabled
         case tempDisabled
         case smsVerification
         case errorBanner
         case unknown
+
+        /// Paired string label matching the Apple Vision OCR Blueprint format.
+        var pairedLabel: String {
+            switch self {
+            case .success: "Success"
+            case .permDisabled: "Perm Disabled"
+            case .tempDisabled: "Temp Disabled"
+            case .noAccount, .incorrectPassword: "No Acc"
+            case .smsVerification: "SMS Detected"
+            case .errorBanner: "Error"
+            case .unknown: "Unsure"
+            }
+        }
     }
 
+    // MARK: - 100/100 Strict OCR Triggers (Apple Vision Blueprint)
+
     private let crucialKeywords: [String] = [
-        "incorrect password", "incorrect", "wrong password", "invalid",
+        // Absolute Priority Triggers (100/100 weight)
         "has been disabled",
         "temporarily disabled",
-        "welcome", "dashboard", "my account", "balance", "deposit",
+        // Secondary Logic — Success
+        "my account", "balance", "deposit", "welcome", "dashboard",
         "logout", "log out", "successfully", "logged in",
+        // Secondary Logic — No Account
+        "incorrect", "not find", "no account", "invalid",
+        "incorrect password", "wrong password",
+        // Tertiary
         "error", "failed",
         "sms", "verification code", "verify your phone", "enter the code",
     ]
 
+    /// Outcome patterns ordered by strict 100/100 weight priority.
+    /// "has been disabled" and "temporarily disabled" are absolute — they override everything.
     private let outcomePatterns: [(pattern: String, outcome: DetectedOutcome)] = [
+        // 100/100 Strict Triggers (absolute priority, checked first)
         ("has been disabled", .permDisabled),
         ("temporarily disabled", .tempDisabled),
-        ("incorrect password", .incorrectPassword),
-        ("wrong password", .incorrectPassword),
-        ("invalid password", .incorrectPassword),
-        ("incorrect", .incorrectPassword),
-        ("verification code", .smsVerification),
-        ("verify your phone", .smsVerification),
-        ("enter the code", .smsVerification),
-        ("sms", .smsVerification),
-        ("welcome", .success),
-        ("dashboard", .success),
+        // Secondary Logic — Success
         ("my account", .success),
         ("balance", .success),
         ("deposit", .success),
+        ("welcome", .success),
+        ("dashboard", .success),
+        ("logout", .success),
+        // Secondary Logic — No Account
+        ("incorrect", .noAccount),
+        ("not find", .noAccount),
+        ("no account", .noAccount),
+        ("invalid", .noAccount),
+        ("incorrect password", .noAccount),
+        ("wrong password", .noAccount),
+        // Tertiary
+        ("verification code", .smsVerification),
+        ("verify your phone", .smsVerification),
+        ("enter the code", .smsVerification),
     ]
 
     func analyzeScreenshot(_ image: UIImage) async -> AnalysisResult {
@@ -248,13 +277,27 @@ class VisionTextCropService {
 
     private func priorityOf(_ outcome: DetectedOutcome) -> Int {
         switch outcome {
-        case .permDisabled: 5
-        case .tempDisabled: 4
-        case .smsVerification: 3
-        case .success: 6
-        case .incorrectPassword: 2
+        case .permDisabled: 6   // 100/100 absolute trigger
+        case .tempDisabled: 5   // 100/100 absolute trigger
+        case .success: 4        // Secondary logic
+        case .noAccount: 3      // Secondary logic
+        case .smsVerification: 2
+        case .incorrectPassword: 1
         case .errorBanner: 1
         case .unknown: 0
         }
+    }
+
+    /// Produces a paired OCR status string from two site results, matching the
+    /// Apple Vision Blueprint's plural vs split definition logic.
+    /// If both sites match → pluralize (e.g. "Successes"). Otherwise → "Joe / Ign".
+    static func pairedOCRStatus(joe: DetectedOutcome, ignition: DetectedOutcome) -> String {
+        if joe == ignition {
+            switch joe {
+            case .unknown: return "Unsure"
+            default: return joe.pairedLabel + "s"
+            }
+        }
+        return "\(joe.pairedLabel) / \(ignition.pairedLabel)"
     }
 }

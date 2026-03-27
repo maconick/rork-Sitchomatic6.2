@@ -93,7 +93,8 @@ nonisolated enum SiteResult: String, Codable, Sendable, CaseIterable {
         case .permDisabled: return .permDisabled
         case .tempDisabled: return .tempDisabled
         case .noAcc:
-            if registeredAttempts >= 3 {
+            // No Account requires 4 complete login cycles before confirmation
+            if registeredAttempts >= 4 {
                 return .noAccount
             }
             return .unsure
@@ -126,14 +127,14 @@ nonisolated struct SiteTarget: Codable, Sendable, Identifiable {
     static let joefortune = SiteTarget(
         id: "joe",
         name: "JoeFortune",
-        url: "https://www.joefortunepokies.win/login",
+        url: "https://joefortunepokies.win/login",
         selectors: SiteSelectors(user: "#username", pass: "#password", submit: "#loginSubmit", error: ".error-message")
     )
 
     static let ignition = SiteTarget(
         id: "ignition",
         name: "Ignition",
-        url: "https://www.ignitioncasino.ooo/?overlay=login",
+        url: "https://ignitioncasino.ooo/?overlay=login",
         selectors: SiteSelectors(user: "#email", pass: "#login-password", submit: "#login-submit", error: ".alert-danger")
     )
 }
@@ -151,6 +152,19 @@ nonisolated struct SiteAttemptResult: Codable, Sendable {
     let responseText: String
     let timestamp: Date
     let durationMs: Int
+    var ocrOutcome: String? = nil
+    var ocrFullText: String? = nil
+    var ocrCrucialMatches: [String]? = nil
+}
+
+/// OCR metadata for a single site's evaluation, used by the Debug Results UI.
+nonisolated struct SiteOCRMetadata: Codable, Sendable {
+    let siteId: String
+    let ocrOutcome: String
+    let crucialMatches: [String]
+    let fullText: String
+    let confidence: Double
+    let screenshotTimestamp: Date
 }
 
 struct DualSiteSession: Identifiable, Codable, Sendable {
@@ -168,6 +182,8 @@ struct DualSiteSession: Identifiable, Codable, Sendable {
     let maxAttempts: Int
     let startTime: Date
     var endTime: Date?
+    var joeOCRMetadata: SiteOCRMetadata?
+    var ignitionOCRMetadata: SiteOCRMetadata?
 
     var isTerminal: Bool {
         switch globalState {
@@ -209,6 +225,16 @@ struct DualSiteSession: Identifiable, Codable, Sendable {
         return "\(joeSiteResult.shortLabel) | \(ignitionSiteResult.shortLabel)"
     }
 
+    /// Apple Vision Blueprint paired OCR status string.
+    /// Format: "Perm Disableds" (same) or "Perm Disabled / Success" (split).
+    var pairedOCRStatus: String? {
+        guard let joeOCR = joeOCRMetadata, let ignOCR = ignitionOCRMetadata else { return nil }
+        if joeOCR.ocrOutcome == ignOCR.ocrOutcome {
+            return joeOCR.ocrOutcome == "Unsure" ? "Unsure" : "\(joeOCR.ocrOutcome)s"
+        }
+        return "\(joeOCR.ocrOutcome) / \(ignOCR.ocrOutcome)"
+    }
+
     func hasSiteResult(_ result: SiteResult) -> Bool {
         joeSiteResult == result || ignitionSiteResult == result
     }
@@ -228,7 +254,9 @@ struct DualSiteSession: Identifiable, Codable, Sendable {
             currentAttempt: 0,
             maxAttempts: 4,
             startTime: Date(),
-            endTime: nil
+            endTime: nil,
+            joeOCRMetadata: nil,
+            ignitionOCRMetadata: nil
         )
     }
 }
@@ -279,8 +307,9 @@ nonisolated struct HumanEmulationConfig: Codable, Sendable {
 }
 
 nonisolated struct TerminationLogic: Sendable {
-    static let successTriggers = ["lobby", "Welcome", "session_id"]
+    // Blueprint 100/100 Strict Triggers
+    static let successTriggers = ["my account", "balance", "deposit", "welcome", "dashboard", "lobby", "session_id"]
     static let permStopTriggers = ["has been disabled"]
     static let tempStopTriggers = ["temporarily disabled"]
-    static let continueTriggers = ["incorrect password", "incorrect"]
+    static let continueTriggers = ["incorrect", "not find", "no account", "invalid", "incorrect password"]
 }
