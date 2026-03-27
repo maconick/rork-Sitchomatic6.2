@@ -975,7 +975,10 @@ class LoginSiteWebSession: NSObject {
 
     func trueDetectionFillEmail(_ email: String) async -> (success: Bool, detail: String) {
         let config = TrueDetectionService.TrueDetectionConfig()
-        let escaped = email.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let escaped = email.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
         let js = """
         (function() {
             var el = document.querySelector('\(config.emailSelector)');
@@ -1004,7 +1007,10 @@ class LoginSiteWebSession: NSObject {
 
     func trueDetectionFillPassword(_ password: String) async -> (success: Bool, detail: String) {
         let config = TrueDetectionService.TrueDetectionConfig()
-        let escaped = password.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let escaped = password.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
         let js = """
         (function() {
             var el = document.querySelector('\(config.passwordSelector)');
@@ -1041,6 +1047,8 @@ class LoginSiteWebSession: NSObject {
                 for (var i = 0; i < fallbacks.length; i++) { btn = document.querySelector(fallbacks[i]); if (btn) break; }
             }
             if (!btn) return 'NOT_FOUND';
+            // Triple-click pattern: matches TrueDetectionService's cycled click protocol
+            // to maximize form submission reliability across different web frameworks
             for (var c = 0; c < 3; c++) {
                 btn.click();
                 btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
@@ -1091,7 +1099,10 @@ class LoginSiteWebSession: NSObject {
     }
 
     func fillForgotPasswordEmail(_ email: String) async -> (success: Bool, detail: String) {
-        let escaped = email.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let escaped = email.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
         let js = """
         (function() {
             var selectors = ['input[type="email"]', 'input#email', 'input[name="email"]', 'input[name="username"]', 'input[type="text"]'];
