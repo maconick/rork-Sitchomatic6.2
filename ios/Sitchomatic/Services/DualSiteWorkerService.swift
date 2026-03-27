@@ -146,7 +146,7 @@ class DualSiteWorkerService {
             session.joeSiteResult = SiteResult.fromLoginOutcome(joeOutcome, registeredAttempts: joeRegistered, maxAttempts: config.maxAttemptsPerSite)
             session.ignitionSiteResult = SiteResult.fromLoginOutcome(ignOutcome, registeredAttempts: ignRegistered, maxAttempts: config.maxAttemptsPerSite)
 
-            let terminalStep = classificationToStep(classification)
+            _ = classificationToStep(classification)
 
             switch classification {
             case .success:

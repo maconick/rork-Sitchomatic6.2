@@ -74,12 +74,6 @@ nonisolated struct URLPerformanceProfile: Codable, Sendable {
         let blankPenalty = (1.0 - blankPageRate) * 0.10
         let loginBonus = (totalAttempts > 0 ? Double(loginSuccessCount) / Double(totalAttempts) : 0) * 0.15
 
-        var recency = 0.3
-        if let last = lastSuccessAt {
-            let ago = Date().timeIntervalSince(last)
-            recency = max(0, 1.0 - (ago / 3600.0))
-        }
-
         let base = srScore + latScore + blockPenalty + challengePenalty + blankPenalty + loginBonus
 
         let streakPenalty = consecutiveFailures >= 3 ? max(0.3, 1.0 - Double(consecutiveFailures) * 0.15) : 1.0

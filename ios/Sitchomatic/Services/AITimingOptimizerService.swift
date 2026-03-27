@@ -152,7 +152,7 @@ class AITimingOptimizerService {
         save()
 
 
-        let newAttemptsSinceAI = profile.totalSamples - Int(profile.lastAIRecalibration.timeIntervalSince1970 == Date.distantPast.timeIntervalSince1970 ? 0 : Double(profile.totalSamples) * 0.8)
+        _ = profile.totalSamples - Int(profile.lastAIRecalibration.timeIntervalSince1970 == Date.distantPast.timeIntervalSince1970 ? 0 : Double(profile.totalSamples) * 0.8)
         if profile.totalSamples >= aiRecalibrationThreshold &&
             profile.totalSamples % aiRecalibrationThreshold == 0 {
             Task {

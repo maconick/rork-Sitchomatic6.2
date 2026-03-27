@@ -65,19 +65,14 @@ nonisolated enum ChargeAmountTier: String, CaseIterable, Identifiable, Sendable,
 
     func randomizedAmount() -> Double {
         let offset = Double.random(in: -variance...variance)
-        return (baseAmount + offset).rounded(toPlaces: 2)
+        let value = baseAmount + offset
+        let multiplier = 100.0
+        return (value * multiplier).rounded() / multiplier
     }
 
     var displayRange: String {
         let lo = Int(baseAmount - variance)
         let hi = Int(baseAmount + variance)
         return "$\(lo)–$\(hi)"
-    }
-}
-
-private extension Double {
-    func rounded(toPlaces places: Int) -> Double {
-        let multiplier = pow(10.0, Double(places))
-        return (self * multiplier).rounded() / multiplier
     }
 }

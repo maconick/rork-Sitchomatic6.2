@@ -1,6 +1,6 @@
 import Foundation
 
-struct PPSRBINData: Sendable {
+nonisolated struct PPSRBINData: Sendable {
     let bin: String
     var scheme: String
     var type: String
