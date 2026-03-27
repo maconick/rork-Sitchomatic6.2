@@ -89,7 +89,7 @@ nonisolated struct AutomationSettings: Codable, Sendable {
     var requeueOnUnsure: Bool = true
     var requeueOnRedBanner: Bool = true
     var maxRequeueCount: Int = 3
-    var minAttemptsBeforeNoAcc: Int = 3
+    var minAttemptsBeforeNoAcc: Int = 4
     var cyclePauseMinMs: Int = 500
     var cyclePauseMaxMs: Int = 1500
 

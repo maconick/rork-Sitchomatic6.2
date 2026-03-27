@@ -300,9 +300,10 @@ class UnifiedSessionViewModel {
     }
 
     func exportResults() -> String {
-        var lines: [String] = ["email,joe_result,ignition_result,paired_result,joe_attempts,ign_attempts,duration,identity_action"]
+        var lines: [String] = ["email,joe_result,ignition_result,paired_result,ocr_status,joe_attempts,ign_attempts,duration,identity_action"]
         for session in sessions where session.isTerminal {
-            lines.append("\(session.credential.email),\(session.joeSiteResult.shortLabel),\(session.ignitionSiteResult.shortLabel),\(session.pairedBadgeText),\(session.joeAttempts.count),\(session.ignitionAttempts.count),\(session.formattedDuration),\(session.identityAction.rawValue)")
+            let ocrStatus = session.pairedOCRStatus ?? "—"
+            lines.append("\(session.credential.email),\(session.joeSiteResult.shortLabel),\(session.ignitionSiteResult.shortLabel),\(session.pairedBadgeText),\(ocrStatus),\(session.joeAttempts.count),\(session.ignitionAttempts.count),\(session.formattedDuration),\(session.identityAction.rawValue)")
         }
         return lines.joined(separator: "\n")
     }

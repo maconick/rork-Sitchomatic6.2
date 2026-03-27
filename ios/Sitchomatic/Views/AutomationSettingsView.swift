@@ -1629,7 +1629,7 @@ struct AutomationSettingsView: View {
             Stepper("Max Requeue Count: \(vm.automationSettings.maxRequeueCount)", value: $vm.automationSettings.maxRequeueCount, in: 0...20)
 
             VStack(alignment: .leading, spacing: 4) {
-                Stepper("Min Attempts Before No Acc: \(vm.automationSettings.minAttemptsBeforeNoAcc)", value: $vm.automationSettings.minAttemptsBeforeNoAcc, in: 3...8)
+                Stepper("Min Attempts Before No Acc: \(vm.automationSettings.minAttemptsBeforeNoAcc)", value: $vm.automationSettings.minAttemptsBeforeNoAcc, in: 4...8)
                 Text("Minimum full login attempts before declaring No Account. Temp disabled = account exists.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1935,6 +1935,16 @@ struct AutomationSettingsView: View {
                 }
             }
             .tint(.purple)
+            Toggle(isOn: Binding(
+                get: { vm.urlRotation.useMirrors },
+                set: { vm.urlRotation.useMirrors = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Use mirrors too (requires Nord)")
+                    Text("Adds geo-restricted mirror URLs to rotation").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .tint(.cyan)
         } header: {
             Label("URL Rotation", systemImage: "arrow.triangle.2.circlepath")
         }
