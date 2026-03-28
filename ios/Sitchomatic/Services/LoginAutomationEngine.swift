@@ -907,12 +907,7 @@ class LoginAutomationEngine {
             }
             lastContentHash = contentHash
 
-            let screenshotImage: UIImage?
-            if let ws = pollResult.welcomeScreenshot {
-                screenshotImage = ws
-            } else {
-                screenshotImage = await session.captureScreenshot()
-            }
+            let screenshotImage: UIImage? = await session.captureScreenshot()
             attempt.responseSnapshot = screenshotImage
 
             if let img = screenshotImage, BlankScreenshotDetector.isBlank(img) {
@@ -943,7 +938,7 @@ class LoginAutomationEngine {
             }
 
             let welcomeTextFound = pollResult.welcomeTextFound
-            let welcomeContext = pollResult.welcomeContext
+            let welcomeContext: String? = welcomeTextFound ? pollResult.finalPageContent.prefix(200).description : nil
 
             attempt.logs.append(PPSRLogEntry(
                 message: "Welcome! rapid poll: \(welcomeTextFound ? "FOUND — \(welcomeContext ?? "")" : "NOT FOUND")",
@@ -956,10 +951,10 @@ class LoginAutomationEngine {
 
             if pollResult.errorBannerDetected {
                 attempt.logs.append(PPSRLogEntry(
-                    message: "RED BANNER ERROR detected: \(pollResult.errorBannerText ?? "error") — wiping session, requeuing to bottom",
+                    message: "RED BANNER ERROR detected — wiping session, requeuing to bottom",
                     level: .warning
                 ))
-                await captureTerminalScreenshot(session: session, attempt: attempt, step: "red_banner_error", note: "RED BANNER ERROR: \(pollResult.errorBannerText ?? "error") — requeued for future retry", autoResult: .unknown, terminalType: .errorBanner)
+                await captureTerminalScreenshot(session: session, attempt: attempt, step: "red_banner_error", note: "RED BANNER ERROR — requeued for future retry", autoResult: .unknown, terminalType: .errorBanner)
                 attempt.status = .failed
                 attempt.errorMessage = "Red banner error detected — requeuing to bottom"
                 attempt.completedAt = Date()
@@ -968,10 +963,10 @@ class LoginAutomationEngine {
 
             if pollResult.smsNotificationDetected {
                 attempt.logs.append(PPSRLogEntry(
-                    message: "SMS NOTIFICATION detected (Ignition): \(pollResult.smsNotificationText ?? "sms verification") — burning session, requeuing with different IP/webview",
+                    message: "SMS NOTIFICATION detected (Ignition) — burning session, requeuing with different IP/webview",
                     level: .warning
                 ))
-                await captureTerminalScreenshot(session: session, attempt: attempt, step: "sms_notification", note: "SMS NOTIFICATION (Ignition): \(pollResult.smsNotificationText ?? "sms verification") — burn session, retry with different setup", autoResult: .unknown, terminalType: .smsVerification)
+                await captureTerminalScreenshot(session: session, attempt: attempt, step: "sms_notification", note: "SMS NOTIFICATION (Ignition) — burn session, retry with different setup", autoResult: .unknown, terminalType: .smsVerification)
                 attempt.status = .failed
                 attempt.errorMessage = "SMS notification detected — burning session, requeuing for retry with different IP/webview"
                 attempt.completedAt = Date()
@@ -987,7 +982,7 @@ class LoginAutomationEngine {
                 welcomeTextFound: welcomeTextFound,
                 redirectedToHomepage: pollResult.redirectedToHomepage,
                 navigationDetected: pollResult.navigationDetected,
-                contentChanged: pollResult.anyContentChange
+                contentChanged: pollResult.navigationDetected
             )
             let _ = logger.stopTimer(key: "\(sessionId)_eval_\(cycle)")
             lastEvaluation = evaluation

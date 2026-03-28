@@ -56,8 +56,6 @@ class LoginSiteWebSession: NSObject {
         sessionId.uuidString.prefix(8).lowercased() + "-" + (targetURL.host ?? "unknown")
     }
 
-    /// Per-instance isolated process pool (HyperFlow architecture).
-    private let isolatedProcessPool = WKProcessPool()
     /// Per-instance isolated data store (HyperFlow architecture).
     private let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
 
@@ -101,7 +99,6 @@ class LoginSiteWebSession: NSObject {
         processTerminated = false
 
         let config = WKWebViewConfiguration()
-        config.processPool = isolatedProcessPool
         config.websiteDataStore = isolatedDataStore
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -291,9 +288,8 @@ class LoginSiteWebSession: NSObject {
         return result.success
     }
 
-    func clickLoginButton() async -> Bool {
-        let result = await clickLoginButtonInternal()
-        return result.success
+    func clickLoginButton() async -> (success: Bool, detail: String) {
+        await clickLoginButtonInternal()
     }
 
     // MARK: Internal Form Helpers
@@ -679,22 +675,15 @@ class LoginSiteWebSession: NSObject {
         username: String,
         password: String,
         sessionId: String
-    ) async -> (overallSuccess: Bool, usernameFilled: Bool, passwordFilled: Bool, submitTriggered: Bool, summary: String) {
+    ) async -> HumanPatternResult {
         let engine = HumanInteractionEngine.shared
-        let result = await engine.executePattern(
+        return await engine.executePattern(
             pattern,
             username: username,
             password: password,
             executeJS: { [weak self] js in await self?.executeJS(js) },
             sessionId: sessionId,
             targetURL: targetURL.absoluteString
-        )
-        return (
-            overallSuccess: result.overallSuccess,
-            usernameFilled: result.usernameFilled,
-            passwordFilled: result.passwordFilled,
-            submitTriggered: result.submitTriggered,
-            summary: result.summary
         )
     }
 
@@ -833,7 +822,6 @@ class LoginSiteWebSession: NSObject {
             return (false, "OCR: no text observations")
         }
         let loginTerms = ["log in", "login", "sign in", "signin", "submit"]
-        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
         for obs in observations {
             guard let candidate = obs.topCandidates(1).first else { continue }
             let text = candidate.string.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1157,64 +1145,6 @@ class LoginSiteWebSession: NSObject {
         return (false, "Password field not found for Enter press: \(result ?? "nil")")
     }
 
-    func fillForgotPasswordEmail(_ email: String) async -> (success: Bool, detail: String) {
-        let escaped = email.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-        let js = """
-        (function() {
-            var selectors = ['input[type="email"]', 'input#email', 'input[name="email"]', 'input[name="username"]', 'input[type="text"]'];
-            var el = null;
-            for (var i = 0; i < selectors.length; i++) {
-                el = document.querySelector(selectors[i]);
-                if (el) break;
-            }
-            if (!el) return 'NOT_FOUND';
-            el.focus();
-            var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (ns && ns.set) { ns.set.call(el, ''); } else { el.value = ''; }
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            if (ns && ns.set) { ns.set.call(el, '\(escaped)'); } else { el.value = '\(escaped)'; }
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-            el.dispatchEvent(new Event('blur', {bubbles: true}));
-            return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
-        })();
-        """
-        let result = await executeJS(js)
-        if result == "OK" || result == "VALUE_MISMATCH" {
-            return (true, "Forgot password email filled")
-        }
-        return (false, "Forgot password email fill failed: \(result ?? "nil")")
-    }
-
-    func clickForgotPasswordSubmit() async -> (success: Bool, detail: String) {
-        let js = """
-        (function() {
-            var selectors = ['button[type="submit"]', 'input[type="submit"]', 'button.submit', '#submit', 'button:not([type])', 'a.submit'];
-            for (var i = 0; i < selectors.length; i++) {
-                var el = document.querySelector(selectors[i]);
-                if (el && !el.disabled) {
-                    el.click();
-                    return 'CLICKED';
-                }
-            }
-            var forms = document.querySelectorAll('form');
-            if (forms.length > 0) {
-                forms[0].dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
-                return 'FORM_SUBMITTED';
-            }
-            return 'NOT_FOUND';
-        })();
-        """
-        let result = await executeJS(js)
-        if result == "CLICKED" || result == "FORM_SUBMITTED" {
-            return (true, "Forgot password submit: \(result ?? "")")
-        }
-        return (false, "Forgot password submit failed: \(result ?? "nil")")
-    }
-
     // MARK: Utilities
 
     func getViewportSize() -> CGSize {
@@ -1252,153 +1182,6 @@ class LoginSiteWebSession: NSObject {
             }
         }
     }
-
-    func clearPasswordFieldOnly() async {
-        let js = """
-        (function() {
-            var el = document.querySelector('input[type="password"]');
-            if (!el) return 'NOT_FOUND';
-            var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (ns && ns.set) { ns.set.call(el, ''); } else { el.value = ''; }
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-            return 'CLEARED';
-        })();
-        """
-        _ = await executeJS(js)
-    }
-
-    func clearEmailFieldOnly() async {
-        let js = """
-        (function() {
-            var selectors = ['input[type="email"]','input[type="text"]','input[name*="email" i]','input[name*="user" i]','input[id*="email" i]','input[id*="user" i]'];
-            var el = null;
-            for (var i = 0; i < selectors.length; i++) { el = document.querySelector(selectors[i]); if (el) break; }
-            if (!el) return 'NOT_FOUND';
-            var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (ns && ns.set) { ns.set.call(el, ''); } else { el.value = ''; }
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-            return 'CLEARED';
-        })();
-        """
-        _ = await executeJS(js)
-    }
-
-    func trueDetectionFillPassword(_ password: String) async -> (success: Bool, detail: String) {
-        let escaped = password.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
-        let js = """
-        (function() {
-            var el = document.querySelector('input[type="password"]');
-            if (!el) return 'NOT_FOUND';
-            el.focus();
-            var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (ns && ns.set) { ns.set.call(el, '\(escaped)'); } else { el.value = '\(escaped)'; }
-            el.dispatchEvent(new Event('focus', {bubbles: true}));
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-            el.dispatchEvent(new Event('blur', {bubbles: true}));
-            return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
-        })();
-        """
-        let result = await executeJS(js)
-        return classifyFillResult(result, fieldName: "Password(trueDetection)")
-    }
-
-    func trueDetectionFillEmail(_ email: String) async -> (success: Bool, detail: String) {
-        let escaped = email.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
-        let js = """
-        (function() {
-            var selectors = ['input[type="email"]','input[type="text"]','input[name*="email" i]','input[name*="user" i]','input[id*="email" i]','input[id*="user" i]'];
-            var el = null;
-            for (var i = 0; i < selectors.length; i++) { el = document.querySelector(selectors[i]); if (el) break; }
-            if (!el) return 'NOT_FOUND';
-            el.focus();
-            var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (ns && ns.set) { ns.set.call(el, '\(escaped)'); } else { el.value = '\(escaped)'; }
-            el.dispatchEvent(new Event('focus', {bubbles: true}));
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-            el.dispatchEvent(new Event('blur', {bubbles: true}));
-            return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
-        })();
-        """
-        let result = await executeJS(js)
-        return classifyFillResult(result, fieldName: "Email(trueDetection)")
-    }
-
-    func trueDetectionTripleClickSubmit() async -> (success: Bool, detail: String) {
-        let js = """
-        (function() {
-            var selectors = ['button[type="submit"]','input[type="submit"]','#login-submit','#loginButton','button.login-button'];
-            var loginTerms = ['log in','login','sign in','signin','submit'];
-            var btn = null;
-            for (var i = 0; i < selectors.length; i++) { var el = document.querySelector(selectors[i]); if (el) { btn = el; break; } }
-            if (!btn) {
-                var allBtns = document.querySelectorAll('button, [role="button"]');
-                for (var j = 0; j < allBtns.length; j++) {
-                    var txt = (allBtns[j].textContent||allBtns[j].value||'').replace(/[\\s]+/g,' ').toLowerCase().trim();
-                    for (var t = 0; t < loginTerms.length; t++) { if (txt.indexOf(loginTerms[t]) !== -1) { btn = allBtns[j]; break; } }
-                    if (btn) break;
-                }
-            }
-            if (!btn) return 'NOT_FOUND';
-            btn.click(); btn.click(); btn.click();
-            return 'TRIPLE_CLICKED';
-        })();
-        """
-        let result = await executeJS(js)
-        if result == "TRIPLE_CLICKED" {
-            return (true, "Login button triple-clicked via trueDetection")
-        }
-        return (false, "trueDetection submit failed: \(result ?? "nil")")
-    }
-
-    func pressEnterOnPasswordField() async -> (success: Bool, detail: String) {
-        let js = """
-        (function() {
-            var el = document.querySelector('input[type="password"]');
-            if (!el) return 'NOT_FOUND';
-            el.focus();
-            var ev = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-            el.dispatchEvent(ev);
-            var ev2 = new KeyboardEvent('keypress', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-            el.dispatchEvent(ev2);
-            var ev3 = new KeyboardEvent('keyup', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-            el.dispatchEvent(ev3);
-            var form = el.closest('form');
-            if (form) { form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true})); }
-            return 'ENTER_PRESSED';
-        })();
-        """
-        let result = await executeJS(js)
-        if result == "ENTER_PRESSED" {
-            return (true, "Enter pressed on password field")
-        }
-        return (false, "pressEnter failed: \(result ?? "nil")")
-    }
-
-    func trueDetectionValidateSuccess() async -> (success: Bool, detail: String) {
-        let js = """
-        (function() {
-            var body = (document.body ? document.body.innerText : '').toLowerCase();
-            var url = window.location.href.toLowerCase();
-            var successMarkers = ['balance','wallet','my account','logout','dashboard','deposit','welcome'];
-            for (var i = 0; i < successMarkers.length; i++) {
-                if (body.indexOf(successMarkers[i]) !== -1) return 'SUCCESS:' + successMarkers[i];
-            }
-            if (url.indexOf('/login') === -1 && url.indexOf('/signin') === -1 && url.indexOf('error') === -1) {
-                if (body.indexOf('balance') !== -1 || body.indexOf('wallet') !== -1) return 'SUCCESS:url+content';
-            }
-            return 'NO_SUCCESS_MARKERS';
-        })();
-        """
-        let result = await executeJS(js)
-        if let result, result.hasPrefix("SUCCESS:") {
-            return (true, "trueDetection validated success: \(result)")
-        }
-        return (false, "trueDetection validation: \(result ?? "nil")")
-    }
 }
 
 // MARK: - LoginSiteWebSession + WKNavigationDelegate
@@ -1432,7 +1215,8 @@ extension LoginSiteWebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                               decidePolicyFor navigationResponse: WKNavigationResponse,
                               decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        let httpResponse = MainActor.assumeIsolated { navigationResponse.response as? HTTPURLResponse }
+        if let httpResponse {
             Task { @MainActor in
                 self.lastHTTPStatusCode = httpResponse.statusCode
             }
@@ -1501,7 +1285,6 @@ class LoginWebSession: NSObject {
     // MARK: Private / Isolation State
 
     private let sessionId: UUID = UUID()
-    private let isolatedProcessPool = WKProcessPool()
     private let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
 
     private var pageLoadContinuation: CheckedContinuation<Bool, Never>?
@@ -1535,7 +1318,6 @@ class LoginWebSession: NSObject {
         }
 
         let config = WKWebViewConfiguration()
-        config.processPool = isolatedProcessPool
         config.websiteDataStore = isolatedDataStore
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -1706,6 +1488,15 @@ class LoginWebSession: NSObject {
 
     func getPageTitle() async -> String {
         await executeJS("document.title") ?? ""
+    }
+
+    func waitForNavigation(timeout: TimeInterval = 30) async -> Bool {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if isPageLoaded { return true }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return isPageLoaded
     }
 
     // MARK: Page Content & Screenshots
@@ -2144,22 +1935,6 @@ class LoginWebSession: NSObject {
         } catch { return false }
     }
 
-    func waitForNavigation(timeout: TimeInterval = 30) async -> Bool {
-        let start = Date()
-        while Date().timeIntervalSince(start) < timeout {
-            if isPageLoaded { return true }
-            try? await Task.sleep(for: .milliseconds(200))
-        }
-        return isPageLoaded
-    }
-
-    func getPageTitle() async -> String {
-        webView?.title ?? ""
-    }
-
-    func getCurrentURL() async -> String {
-        webView?.url?.absoluteString ?? ""
-    }
 }
 
 // MARK: - LoginWebSession + WKNavigationDelegate
@@ -2189,7 +1964,8 @@ extension LoginWebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                               decidePolicyFor navigationResponse: WKNavigationResponse,
                               decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        let httpResponse = MainActor.assumeIsolated { navigationResponse.response as? HTTPURLResponse }
+        if let httpResponse {
             Task { @MainActor in self.lastHTTPStatusCode = httpResponse.statusCode }
         }
         decisionHandler(.allow)
@@ -2250,7 +2026,6 @@ class BPointWebSession: NSObject {
     // MARK: Private / Isolation State
 
     private let sessionId: UUID = UUID()
-    private let isolatedProcessPool = WKProcessPool()
     private let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
 
     private var pageLoadContinuation: CheckedContinuation<Bool, Never>?
@@ -2283,7 +2058,6 @@ class BPointWebSession: NSObject {
         if webView != nil { tearDown() }
 
         let config = WKWebViewConfiguration()
-        config.processPool = isolatedProcessPool
         config.websiteDataStore = isolatedDataStore
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -2408,7 +2182,7 @@ class BPointWebSession: NSObject {
         if loaded {
             logger.log("BPointWebSession[HF]: page loaded in \(loadMs ?? 0)ms",
                        category: .webView, level: .success, durationMs: loadMs)
-            if stealthEnabled, let profile = stealthProfile {
+            if stealthEnabled, stealthProfile != nil {
                 _ = await executeJS(PPSRStealthService.shared.fingerprintJS())
                 try? await Task.sleep(for: .milliseconds(1500))
             }
@@ -2893,18 +2667,6 @@ class BPointWebSession: NSObject {
         return false
     }
 
-    func getCurrentURL() async -> String {
-        webView?.url?.absoluteString ?? ""
-    }
-
-    func waitForNavigation(timeout: TimeInterval = 30) async -> Bool {
-        let start = Date()
-        while Date().timeIntervalSince(start) < timeout {
-            if isPageLoaded { return true }
-            try? await Task.sleep(for: .milliseconds(200))
-        }
-        return isPageLoaded
-    }
 }
 
 // MARK: - BPointWebSession + WKNavigationDelegate
@@ -2934,7 +2696,8 @@ extension BPointWebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                               decidePolicyFor navigationResponse: WKNavigationResponse,
                               decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        let httpResponse = MainActor.assumeIsolated { navigationResponse.response as? HTTPURLResponse }
+        if let httpResponse {
             Task { @MainActor in self.lastHTTPStatusCode = httpResponse.statusCode }
         }
         decisionHandler(.allow)

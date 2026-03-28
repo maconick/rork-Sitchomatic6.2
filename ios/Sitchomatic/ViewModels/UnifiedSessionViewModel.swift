@@ -18,15 +18,15 @@ class UnifiedSessionViewModel {
     var showBatchResultPopup: Bool = false
     var batchStartTime: Date?
     var pauseCountdown: Int = 0
-    private var pauseCountdownTask: Task<Void, Never>?
-    private var batchTask: Task<Void, Never>?
-    private var forceStopTask: Task<Void, Never>?
+    private nonisolated(unsafe) var pauseCountdownTask: Task<Void, Never>?
+    private nonisolated(unsafe) var batchTask: Task<Void, Never>?
+    private nonisolated(unsafe) var forceStopTask: Task<Void, Never>?
     private let worker = DualSiteWorkerService.shared
     private let logger = DebugLogger.shared
     private let notifications = PPSRNotificationService.shared
     private let backgroundService = BackgroundTaskService.shared
     private let persistenceKey = "unified_sessions_v1"
-    private var saveDebouncerTask: Task<Void, Never>?
+    private nonisolated(unsafe) var saveDebouncerTask: Task<Void, Never>?
 
     deinit {
         pauseCountdownTask?.cancel()
