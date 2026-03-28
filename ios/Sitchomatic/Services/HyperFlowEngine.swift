@@ -129,10 +129,17 @@ public actor AutomationPairSession {
     let sessionID = UUID()
     let task: PairedTask
 
-    // Crucial: A unique ProcessPool and DataStore for THIS PAIR ONLY.
+    // Crucial: A unique nonPersistent DataStore for THIS PAIR ONLY.
     // This provides the strict cookie/storage isolation requested.
-    let isolatedProcessPool = WKProcessPool()
-    let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
+    // Note: WKProcessPool was removed — deprecated since iOS 15, no effect on iOS 18+.
+    private var isolatedDataStore: WKWebsiteDataStore?
+
+    private func getOrCreateDataStore() async -> WKWebsiteDataStore {
+        if let store = isolatedDataStore { return store }
+        let store = await MainActor.run { WKWebsiteDataStore.nonPersistent() }
+        isolatedDataStore = store
+        return store
+    }
 
     private let allowedDomains: Set<String>
     private let logger = Logger(subsystem: "com.hyperflow.scraper", category: "Session")
@@ -149,12 +156,13 @@ public actor AutomationPairSession {
         // the Primary worker is instantly cancelled and torn down, maintaining pair integrity.
         try await withThrowingTaskGroup(of: Data?.self) { group in
 
+            let dataStore = await self.getOrCreateDataStore()
+
             // 1. Launch Primary Worker
             group.addTask {
                 await HeadlessWebViewWorker.evaluateAndStream(
                     url: self.task.primaryURL,
-                    processPool: self.isolatedProcessPool,
-                    dataStore: self.isolatedDataStore,
+                    dataStore: dataStore,
                     role: .primary,
                     viewport: self.task.primaryViewport,
                     allowedDomains: self.allowedDomains
@@ -165,8 +173,7 @@ public actor AutomationPairSession {
             group.addTask {
                 await HeadlessWebViewWorker.evaluateAndStream(
                     url: self.task.secondaryURL,
-                    processPool: self.isolatedProcessPool,
-                    dataStore: self.isolatedDataStore,
+                    dataStore: dataStore,
                     role: .secondary,
                     viewport: self.task.secondaryViewport,
                     allowedDomains: self.allowedDomains
@@ -236,20 +243,19 @@ public final class HeadlessWebViewWorker: NSObject, WKNavigationDelegate, WKScri
 
     public static func evaluateAndStream(
         url: URL,
-        processPool: WKProcessPool,
         dataStore: WKWebsiteDataStore,
         role: WorkerRole,
         viewport: CGSize,
         allowedDomains: Set<String>
     ) async -> Data? {
         let worker = HeadlessWebViewWorker(role: role, allowedDomains: allowedDomains)
-        return await worker.run(url: url, processPool: processPool, dataStore: dataStore, viewport: viewport)
+        return await worker.run(url: url, dataStore: dataStore, viewport: viewport)
     }
 
     // MARK: Lifecycle
 
-    private func run(url: URL, processPool: WKProcessPool, dataStore: WKWebsiteDataStore, viewport: CGSize) async -> Data? {
-        setUp(processPool: processPool, dataStore: dataStore, viewport: viewport)
+    private func run(url: URL, dataStore: WKWebsiteDataStore, viewport: CGSize) async -> Data? {
+        setUp(dataStore: dataStore, viewport: viewport)
         defer { tearDown() }
 
         guard let webView = self.webView else { return nil }
@@ -297,9 +303,8 @@ public final class HeadlessWebViewWorker: NSObject, WKNavigationDelegate, WKScri
         return nil
     }
 
-    private func setUp(processPool: WKProcessPool, dataStore: WKWebsiteDataStore, viewport: CGSize) {
+    private func setUp(dataStore: WKWebsiteDataStore, viewport: CGSize) {
         let config = WKWebViewConfiguration()
-        config.processPool = processPool
         config.websiteDataStore = dataStore
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -367,7 +372,8 @@ public final class HeadlessWebViewWorker: NSObject, WKNavigationDelegate, WKScri
     nonisolated public func webView(_ webView: WKWebView,
                                      decidePolicyFor navigationAction: WKNavigationAction,
                                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url, let host = url.host else {
+        let requestURL = MainActor.assumeIsolated { navigationAction.request.url }
+        guard let url = requestURL, let host = url.host else {
             decisionHandler(.cancel)
             return
         }
@@ -389,7 +395,8 @@ public final class HeadlessWebViewWorker: NSObject, WKNavigationDelegate, WKScri
 
     nonisolated public func userContentController(_ userContentController: WKUserContentController,
                                                    didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any] else { return }
+        let body: [String: Any]? = MainActor.assumeIsolated { message.body as? [String: Any] }
+        guard let body else { return }
         Task { @MainActor in
             if let jsonData = try? JSONSerialization.data(withJSONObject: body) {
                 self.streamedData = jsonData

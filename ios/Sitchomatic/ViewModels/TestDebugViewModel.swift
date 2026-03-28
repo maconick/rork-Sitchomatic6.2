@@ -38,7 +38,7 @@ class TestDebugViewModel {
     var isRetryingFailed: Bool = false
     var showAppliedToast: Bool = false
 
-    private var batchTask: Task<Void, Never>?
+    private nonisolated(unsafe) var batchTask: Task<Void, Never>?
 
     deinit {
         batchTask?.cancel()

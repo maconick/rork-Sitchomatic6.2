@@ -56,8 +56,6 @@ class LoginSiteWebSession: NSObject {
         sessionId.uuidString.prefix(8).lowercased() + "-" + (targetURL.host ?? "unknown")
     }
 
-    /// Per-instance isolated process pool (HyperFlow architecture).
-    private let isolatedProcessPool = WKProcessPool()
     /// Per-instance isolated data store (HyperFlow architecture).
     private let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
 
@@ -101,7 +99,6 @@ class LoginSiteWebSession: NSObject {
         processTerminated = false
 
         let config = WKWebViewConfiguration()
-        config.processPool = isolatedProcessPool
         config.websiteDataStore = isolatedDataStore
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -291,9 +288,8 @@ class LoginSiteWebSession: NSObject {
         return result.success
     }
 
-    func clickLoginButton() async -> Bool {
-        let result = await clickLoginButtonInternal()
-        return result.success
+    func clickLoginButton() async -> (success: Bool, detail: String) {
+        await clickLoginButtonInternal()
     }
 
     // MARK: Internal Form Helpers
@@ -679,22 +675,15 @@ class LoginSiteWebSession: NSObject {
         username: String,
         password: String,
         sessionId: String
-    ) async -> (overallSuccess: Bool, usernameFilled: Bool, passwordFilled: Bool, submitTriggered: Bool, summary: String) {
+    ) async -> HumanPatternResult {
         let engine = HumanInteractionEngine.shared
-        let result = await engine.executePattern(
+        return await engine.executePattern(
             pattern,
             username: username,
             password: password,
             executeJS: { [weak self] js in await self?.executeJS(js) },
             sessionId: sessionId,
             targetURL: targetURL.absoluteString
-        )
-        return (
-            overallSuccess: result.overallSuccess,
-            usernameFilled: result.usernameFilled,
-            passwordFilled: result.passwordFilled,
-            submitTriggered: result.submitTriggered,
-            summary: result.summary
         )
     }
 
@@ -833,7 +822,6 @@ class LoginSiteWebSession: NSObject {
             return (false, "OCR: no text observations")
         }
         let loginTerms = ["log in", "login", "sign in", "signin", "submit"]
-        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
         for obs in observations {
             guard let candidate = obs.topCandidates(1).first else { continue }
             let text = candidate.string.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1166,7 +1154,7 @@ class LoginSiteWebSession: NSObject {
     private func waitForDOMReady(timeout: TimeInterval) async {
         let start = Date()
         while Date().timeIntervalSince(start) < timeout {
-            let ready = await executeJS("document.readyState") as? String ?? ""
+            let ready = await executeJS("document.readyState") ?? ""
             if ready == "complete" || ready == "interactive" {
                 try? await Task.sleep(for: .milliseconds(500))
                 return
@@ -1227,7 +1215,8 @@ extension LoginSiteWebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                               decidePolicyFor navigationResponse: WKNavigationResponse,
                               decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        let httpResponse = MainActor.assumeIsolated { navigationResponse.response as? HTTPURLResponse }
+        if let httpResponse {
             Task { @MainActor in
                 self.lastHTTPStatusCode = httpResponse.statusCode
             }
@@ -1296,7 +1285,6 @@ class LoginWebSession: NSObject {
     // MARK: Private / Isolation State
 
     private let sessionId: UUID = UUID()
-    private let isolatedProcessPool = WKProcessPool()
     private let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
 
     private var pageLoadContinuation: CheckedContinuation<Bool, Never>?
@@ -1330,7 +1318,6 @@ class LoginWebSession: NSObject {
         }
 
         let config = WKWebViewConfiguration()
-        config.processPool = isolatedProcessPool
         config.websiteDataStore = isolatedDataStore
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -1977,7 +1964,8 @@ extension LoginWebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                               decidePolicyFor navigationResponse: WKNavigationResponse,
                               decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        let httpResponse = MainActor.assumeIsolated { navigationResponse.response as? HTTPURLResponse }
+        if let httpResponse {
             Task { @MainActor in self.lastHTTPStatusCode = httpResponse.statusCode }
         }
         decisionHandler(.allow)
@@ -2038,7 +2026,6 @@ class BPointWebSession: NSObject {
     // MARK: Private / Isolation State
 
     private let sessionId: UUID = UUID()
-    private let isolatedProcessPool = WKProcessPool()
     private let isolatedDataStore = WKWebsiteDataStore.nonPersistent()
 
     private var pageLoadContinuation: CheckedContinuation<Bool, Never>?
@@ -2071,7 +2058,6 @@ class BPointWebSession: NSObject {
         if webView != nil { tearDown() }
 
         let config = WKWebViewConfiguration()
-        config.processPool = isolatedProcessPool
         config.websiteDataStore = isolatedDataStore
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -2196,7 +2182,7 @@ class BPointWebSession: NSObject {
         if loaded {
             logger.log("BPointWebSession[HF]: page loaded in \(loadMs ?? 0)ms",
                        category: .webView, level: .success, durationMs: loadMs)
-            if stealthEnabled, let profile = stealthProfile {
+            if stealthEnabled, stealthProfile != nil {
                 _ = await executeJS(PPSRStealthService.shared.fingerprintJS())
                 try? await Task.sleep(for: .milliseconds(1500))
             }
@@ -2710,7 +2696,8 @@ extension BPointWebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                               decidePolicyFor navigationResponse: WKNavigationResponse,
                               decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        let httpResponse = MainActor.assumeIsolated { navigationResponse.response as? HTTPURLResponse }
+        if let httpResponse {
             Task { @MainActor in self.lastHTTPStatusCode = httpResponse.statusCode }
         }
         decisionHandler(.allow)
