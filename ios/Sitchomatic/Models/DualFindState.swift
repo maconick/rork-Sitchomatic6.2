@@ -146,6 +146,30 @@ nonisolated struct DualFindInterventionRequest: Identifiable, Sendable {
     let passwordIndex: Int
 }
 
+nonisolated enum DualFindScreenshotMode: Int, CaseIterable, Sendable, Identifiable {
+    case none = 0
+    case one = 1
+    case three = 3
+    case five = 5
+
+    nonisolated var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .none: "Off"
+        case .one: "1"
+        case .three: "3"
+        case .five: "5"
+        }
+    }
+
+    var capturesPageLoad: Bool { self == .five }
+    var capturesPostFill: Bool { self == .three || self == .five }
+    var capturesPreClick: Bool { self == .five }
+    var capturesPostClick: Bool { self == .three || self == .five }
+    var capturesFinalResponse: Bool { self != .none }
+}
+
 nonisolated enum DualFindSessionCount: Int, CaseIterable, Sendable {
     case four = 4
     case six = 6
