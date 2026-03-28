@@ -40,6 +40,11 @@ struct DualFindRunningView: View {
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled()
         }
+        .sheet(isPresented: $vm.showLiveView) {
+            DualFindLiveViewSheet(vm: vm)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .sensoryFeedback(.success, trigger: vm.hits.count)
         .sensoryFeedback(.warning, trigger: vm.interventionUnsureCount)
     }
@@ -70,12 +75,48 @@ struct DualFindRunningView: View {
                     .clipShape(Capsule())
             }
 
-            ProgressView(value: vm.progressFraction)
-                .tint(.purple)
+            HStack(spacing: 10) {
+                ProgressView(value: vm.progressFraction)
+                    .tint(.purple)
+
+                screenshotModePicker
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color(.secondarySystemGroupedBackground))
+    }
+
+    private var screenshotModePicker: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.5))
+
+            HStack(spacing: 0) {
+                ForEach(DualFindScreenshotMode.allCases) { mode in
+                    Button {
+                        vm.screenshotMode = mode
+                    } label: {
+                        Text(mode.label)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(vm.screenshotMode == mode ? .white : .white.opacity(0.35))
+                            .frame(width: 22, height: 18)
+                            .background(vm.screenshotMode == mode ? .purple.opacity(0.7) : .clear)
+                            .clipShape(.rect(cornerRadius: 4))
+                    }
+                }
+            }
+            .padding(2)
+            .background(.white.opacity(0.08))
+            .clipShape(.rect(cornerRadius: 6))
+
+            if vm.screenshotsCapturedCount > 0 {
+                Text("\(vm.screenshotsCapturedCount)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.purple)
+            }
+        }
     }
 
     // MARK: - Hits
@@ -168,6 +209,7 @@ struct DualFindRunningView: View {
         let isJoe = session.platform.contains("Joe")
         let accent: Color = isJoe ? .green : .orange
         let platformPaused = isJoe ? vm.isJoePaused : vm.isIgnPaused
+        let site: LoginTargetSite = isJoe ? .joefortune : .ignition
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
@@ -184,6 +226,14 @@ struct DualFindRunningView: View {
                     .foregroundStyle(.white.opacity(0.4))
 
                 Spacer()
+
+                Button {
+                    vm.openLiveView(site: site, index: session.index)
+                } label: {
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.purple.opacity(0.7))
+                }
 
                 if platformPaused {
                     Image(systemName: "pause.circle.fill")

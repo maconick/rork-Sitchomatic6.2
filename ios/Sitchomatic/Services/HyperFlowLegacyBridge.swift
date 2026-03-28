@@ -276,6 +276,10 @@ class LoginSiteWebSession: NSObject {
         return await RenderStableScreenshotService.shared.captureStableScreenshot(from: webView)
     }
 
+    func blurActiveElement() async {
+        _ = await executeJS("try { document.activeElement.blur(); } catch(e) {}")
+    }
+
     // MARK: Form Filling
 
     func fillEmailField(value: String) async -> Bool {
@@ -341,6 +345,8 @@ class LoginSiteWebSession: NSObject {
             el.dispatchEvent(new Event('input', {bubbles: true}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
             el.dispatchEvent(new Event('blur', {bubbles: true}));
+            el.blur();
+            try { document.activeElement.blur(); } catch(e) {}
             return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
         })();
         """
@@ -719,11 +725,11 @@ class LoginSiteWebSession: NSObject {
             var inputs = document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="tel"], input[type="search"], input:not([type])');
             var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
             for (var i = 0; i < inputs.length; i++) {
-                inputs[i].focus();
                 if (ns && ns.set) { ns.set.call(inputs[i], ''); } else { inputs[i].value = ''; }
                 inputs[i].dispatchEvent(new Event('input', {bubbles: true}));
                 inputs[i].dispatchEvent(new Event('change', {bubbles: true}));
             }
+            try { document.activeElement.blur(); } catch(e) {}
             return 'CLEARED';
         })();
         """
@@ -746,6 +752,8 @@ class LoginSiteWebSession: NSObject {
                 el.dispatchEvent(new Event('input', {bubbles: true}));
                 el.dispatchEvent(new Event('change', {bubbles: true}));
                 el.dispatchEvent(new Event('blur', {bubbles: true}));
+                el.blur();
+                try { document.activeElement.blur(); } catch(e) {}
                 return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
             })();
             """
@@ -771,6 +779,8 @@ class LoginSiteWebSession: NSObject {
                 el.dispatchEvent(new Event('input', {bubbles: true}));
                 el.dispatchEvent(new Event('change', {bubbles: true}));
                 el.dispatchEvent(new Event('blur', {bubbles: true}));
+                el.blur();
+                try { document.activeElement.blur(); } catch(e) {}
                 return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
             })();
             """
@@ -988,11 +998,11 @@ class LoginSiteWebSession: NSObject {
         (function() {
             var el = document.querySelector('input[type="password"]');
             if (!el) return 'NOT_FOUND';
-            el.focus();
             var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
             if (ns && ns.set) { ns.set.call(el, ''); } else { el.value = ''; }
             el.dispatchEvent(new Event('input', {bubbles: true}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
+            try { document.activeElement.blur(); } catch(e) {}
             return 'CLEARED';
         })();
         """
@@ -1006,11 +1016,11 @@ class LoginSiteWebSession: NSObject {
             for (var i = 0; i < selectors.length; i++) {
                 var el = document.querySelector(selectors[i]);
                 if (el) {
-                    el.focus();
                     var ns = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
                     if (ns && ns.set) { ns.set.call(el, ''); } else { el.value = ''; }
                     el.dispatchEvent(new Event('input', {bubbles: true}));
                     el.dispatchEvent(new Event('change', {bubbles: true}));
+                    try { document.activeElement.blur(); } catch(e) {}
                     return 'CLEARED';
                 }
             }
@@ -1042,6 +1052,8 @@ class LoginSiteWebSession: NSObject {
             el.dispatchEvent(new Event('input', {bubbles: true}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
             el.dispatchEvent(new Event('blur', {bubbles: true}));
+            el.blur();
+            try { document.activeElement.blur(); } catch(e) {}
             return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
         })();
         """
@@ -1071,6 +1083,8 @@ class LoginSiteWebSession: NSObject {
             el.dispatchEvent(new Event('input', {bubbles: true}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
             el.dispatchEvent(new Event('blur', {bubbles: true}));
+            el.blur();
+            try { document.activeElement.blur(); } catch(e) {}
             return el.value === '\(escaped)' ? 'OK' : 'VALUE_MISMATCH';
         })();
         """
@@ -1135,6 +1149,8 @@ class LoginSiteWebSession: NSObject {
             el.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true}));
             var form = el.closest('form');
             if (form) { form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true})); }
+            el.blur();
+            try { document.activeElement.blur(); } catch(e) {}
             return 'ENTER_PRESSED';
         })();
         """

